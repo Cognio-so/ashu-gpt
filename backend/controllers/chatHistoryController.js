@@ -156,4 +156,51 @@ exports.deleteConversation = async (req, res) => {
         console.error('Error deleting conversation:', error);
         res.status(500).json({ success: false, message: 'Error deleting conversation', error: error.message });
     }
+};
+
+exports.getTeamHistory = async (req, res) => {
+    try {
+        // Check if the user has admin role (NOT isAdmin property)
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ 
+                success: false, 
+                message: 'Access denied. Only admins can view team history.' 
+            });
+        }
+
+        // Get team's chat history (all conversations)
+        const conversations = await ChatHistory.find({})
+            .sort({ updatedAt: -1 })
+            .populate('userId', 'name email') // Get user details
+            .lean();
+
+        // Format conversations for frontend
+        const formattedConversations = conversations.map(conv => ({
+            _id: conv._id,
+            userId: conv.userId?._id || conv.userId,
+            userName: conv.userId?.name || 'Team Member',
+            userEmail: conv.userId?.email || '',
+            gptId: conv.gptId,
+            gptName: conv.gptName,
+            lastMessage: conv.lastMessage || (conv.messages.length > 0 ? conv.messages[conv.messages.length-1].content : ''),
+            updatedAt: conv.updatedAt,
+            messageCount: conv.messages.length,
+            model: conv.model || 'gpt-4o-mini',
+            summary: conv.summary,
+            messages: conv.messages.map(msg => ({
+                role: msg.role,
+                content: msg.content,
+                timestamp: msg.timestamp
+            }))
+        }));
+
+        res.json({ success: true, conversations: formattedConversations });
+    } catch (error) {
+        console.error('Error fetching team chat history:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Error fetching team chat history', 
+            error: error.message 
+        });
+    }
 }; 

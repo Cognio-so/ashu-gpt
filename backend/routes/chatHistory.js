@@ -12,6 +12,9 @@ router.post('/save', chatHistoryController.saveMessage);
 // Get user's chat history
 router.get('/user/:userId', chatHistoryController.getUserHistory);
 
+// Get team's chat history (for admins)
+router.get('/team', chatHistoryController.getTeamHistory);
+
 // Get specific conversation
 router.get('/conversation/:userId/:gptId', chatHistoryController.getConversation);
 

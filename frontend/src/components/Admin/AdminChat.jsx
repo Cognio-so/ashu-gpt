@@ -106,6 +106,7 @@ const AdminChat = () => {
     const [hasInteracted, setHasInteracted] = useState(false);
     const [conversationMemory, setConversationMemory] = useState([]);
     const [hasNotifiedGptOpened, setHasNotifiedGptOpened] = useState(false);
+    const [conversationId, setConversationId] = useState(null);
     
     // Use effect to handle user data changes
     useEffect(() => {
@@ -238,6 +239,53 @@ const AdminChat = () => {
         handleChatSubmit(item.prompt);
     };
 
+    // Function to save messages to history
+    const saveMessageToHistory = async (message, role) => {
+        try {
+            if (!user?._id || !gptData || !message || !message.trim()) {
+                console.warn('Cannot save message - missing data:', { 
+                    userId: user?._id, 
+                    gptId: gptData?._id,
+                    hasMessage: !!message,
+                    role
+                });
+                return null;
+            }
+
+            console.log(`Saving ${role} message to history:`, message.substring(0, 30) + '...');
+            
+            const payload = {
+                userId: user._id,
+                gptId: gptData._id,
+                gptName: gptData.name || 'AI Assistant',
+                message: message.trim(),
+                role: role,
+                model: gptData.model || 'gpt-4o-mini'
+            };
+            
+            // Include conversation ID if it exists for threading messages
+            if (conversationId) {
+                payload.conversationId = conversationId;
+            }
+            
+            const response = await axiosInstance.post('/api/chat-history/save', payload, {
+                withCredentials: true
+            });
+
+            // Save the conversation ID for subsequent messages
+            if (response.data && response.data.conversation && response.data.conversation._id) {
+                setConversationId(response.data.conversation._id);
+            }
+
+            console.log(`${role} message saved successfully:`, response.data);
+            return response.data;
+        } catch (error) {
+            console.error(`Error saving ${role} message to history:`, error.response?.data || error.message);
+            return null;
+        }
+    };
+
+    // Update handleChatSubmit to save messages
     const handleChatSubmit = async (message) => {
         if (!message.trim()) return;
 
@@ -248,6 +296,9 @@ const AdminChat = () => {
                 content: message,
                 timestamp: new Date()
             };
+            
+            // Save user message to history first
+            await saveMessageToHistory(message, 'user');
             
             // Add to UI messages
             setMessages(prev => [...prev, userMessage]);
@@ -338,6 +389,10 @@ const AdminChat = () => {
                 timestamp: new Date()
             };
             setMessages(prev => [...prev, errorResponse]);
+            
+            // Save error message to history
+            await saveMessageToHistory(errorResponse.content, 'assistant');
+            
             setStreamingMessage(null); // Clear any partial streaming message
         } finally {
             setIsLoading(false);
@@ -507,6 +562,7 @@ const AdminChat = () => {
         }
     }, [streamingMessage]);
 
+    // Update handleStreamingResponse to save completed assistant messages
     const handleStreamingResponse = async (response) => {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -516,6 +572,11 @@ const AdminChat = () => {
                 const { done, value } = await reader.read();
                 
                 if (done) {
+                    // Save the complete message to history when streaming is done
+                    if (streamingMessage) {
+                        await saveMessageToHistory(streamingMessage.content, 'assistant');
+                    }
+                    
                     setStreamingMessage(prev => prev ? { ...prev, isStreaming: false } : null);
                     break;
                 }
@@ -577,13 +638,17 @@ const AdminChat = () => {
             }
         } catch (err) {
             console.error("Error reading stream:", err);
+            const errorContent = "Error reading response stream.";
             setStreamingMessage({
                 id: Date.now(),
                 role: 'assistant',
-                content: "Error reading response stream.",
+                content: errorContent,
                 isStreaming: false,
                 timestamp: new Date()
             });
+            
+            // Save error message to history
+            await saveMessageToHistory(errorContent, 'assistant');
         }
     };
 

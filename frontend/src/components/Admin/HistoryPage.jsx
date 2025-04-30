@@ -7,20 +7,22 @@ import {
   IoFilterOutline,
   IoChevronDown,
   IoEllipse,
-  IoArrowBack
+  IoArrowBack,
+  IoChatbubblesOutline
 } from 'react-icons/io5';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTheme } from '../../context/ThemeContext'; // Import useTheme
+import { useAuth } from '../../context/AuthContext';
+import { axiosInstance } from '../../api/axiosInstance';
 
 // Import team member data
 import { teamMembers } from './teamData';
-import { axiosInstance } from '../../api/axiosInstance';
-
 
 const HistoryPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { isDarkMode } = useTheme(); // Get theme state
+  const { user } = useAuth();
   
   // Initialize view type from URL parameter or default to 'personal'
   const queryParams = new URLSearchParams(location.search);
@@ -38,30 +40,112 @@ const HistoryPage = () => {
       edit: true,
       delete: true,
       settings: true,
+      chat: true,
     },
     dateRange: 'all',
   });
   
   const filterDropdownRef = useRef(null);
 
+  // Fetch real chat history data
   useEffect(() => {
     const fetchActivityData = async () => {
+      if (!user?._id) return;
+      
       setIsLoading(true);
       try {
-        setTimeout(() => {
-          const mockData = generateMockData(viewType);
-          setActivities(mockData);
-          setFilteredActivities(mockData);
-          setIsLoading(false);
-        }, 800);
+        // For personal view - fetch user's own chat history
+        if (viewType === 'personal') {
+          const response = await axiosInstance.get(
+            `/api/chat-history/user/${user._id}`, 
+            { withCredentials: true }
+          );
+          
+          if (response.data.success && response.data.conversations) {
+            const conversations = response.data.conversations;
+            
+            // Format conversations for display
+            const formattedHistory = conversations.map(convo => ({
+              id: convo._id,
+              user: { id: user._id, name: user.name || 'You', email: user.email || '' },
+              action: 'Chat conversation',
+              details: `with ${convo.gptName || 'AI Assistant'}`,
+              timestamp: convo.updatedAt || convo.createdAt,
+              conversation: convo,
+              type: 'chat'
+            }));
+            
+            setActivities(formattedHistory);
+            setFilteredActivities(formattedHistory);
+          } else {
+            setActivities([]);
+            setFilteredActivities([]);
+          }
+        } 
+        // For team view - fetch all team chat history
+        else if (viewType === 'team') {
+          try {
+            // Check if user is an admin - using role property instead of isAdmin
+            if (user.role !== 'admin') {
+              // If not admin, show a message and revert to personal view
+              console.log("Non-admin user attempted to access team view");
+              setViewType('personal');
+              return;
+            }
+            
+            const response = await axiosInstance.get(
+              `/api/chat-history/team`, 
+              { withCredentials: true }
+            );
+            
+            if (response.data.success && response.data.conversations) {
+              const conversations = response.data.conversations;
+              
+              // Format conversations for display with user information
+              const formattedHistory = conversations.map(convo => ({
+                id: convo._id,
+                user: { 
+                  id: convo.userId, 
+                  name: convo.userName || 'Team Member', 
+                  email: convo.userEmail || '' 
+                },
+                action: 'Chat conversation',
+                details: `with ${convo.gptName || 'AI Assistant'}`,
+                timestamp: convo.updatedAt || convo.createdAt,
+                conversation: convo,
+                type: 'chat'
+              }));
+              
+              setActivities(formattedHistory);
+              setFilteredActivities(formattedHistory);
+            } else {
+              setActivities([]);
+              setFilteredActivities([]);
+            }
+          } catch (error) {
+            console.warn("Team history view error:", error);
+            
+            // If we get a 403 Forbidden error, the user doesn't have permission
+            if (error.response?.status === 403) {
+              // Show personal view instead and disable team tab
+              setViewType('personal');
+            } else {
+              // For other errors, still fall back to personal view
+              setViewType('personal');
+            }
+          }
+        }
       } catch (error) {
         console.error("Error fetching activity data:", error);
+        setActivities([]);
+        setFilteredActivities([]);
+      } finally {
         setIsLoading(false);
       }
     };
 
     fetchActivityData();
-  }, [viewType]);
+  }, [user, viewType]);
 
   // Filter activities based on search query and filter options
   useEffect(() => {
@@ -103,96 +187,19 @@ const HistoryPage = () => {
 
   // Helper function to determine action type
   const getActionType = (action) => {
+    if (action.includes('Chat conversation')) return 'chat';
     if (action.includes('Created') || action.includes('Added')) return 'create';
     if (action.includes('Edited') || action.includes('Updated') || action.includes('Modified')) return 'edit';
     if (action.includes('Deleted') || action.includes('Removed')) return 'delete';
     if (action.includes('Changed settings') || action.includes('Updated settings')) return 'settings';
-    return 'edit'; // Default
+    return 'chat'; // Default changed to chat as most activities will be chats now
   };
 
-  // Generate random mock data using actual team member data
-  const generateMockData = (type) => {
-    const actions = [
-      'Created new custom GPT',
-      'Edited custom GPT settings',
-      'Updated API keys',
-      'Changed settings',
-      'Deleted inactive GPT',
-      'Added new team member',
-      'Modified user permissions',
-      'Updated profile information'
-    ];
-    
-    let users = [];
-    
-    if (type === 'personal') {
-      users = [{ id: '1', name: 'You', email: 'you@gptnexus.com', avatar: null }];
-    } else {
-      // Filter out admin users from team view
-      users = teamMembers
-        .filter(member => member.role !== 'Admin')
-        .map(member => ({
-          id: member.id.toString(),
-          name: member.name,
-          email: member.email,
-          avatar: null,
-          department: member.department,
-          position: member.position,
-          role: member.role,
-          status: member.status
-        }));
+  // Handle chat history item click
+  const handleChatHistoryClick = (conversation) => {
+    if (conversation && conversation.gptId) {
+      navigate(`/admin/chat/${conversation.gptId}?loadHistory=true&conversationId=${conversation._id}`);
     }
-    
-    const gptNames = [
-      'Research Assistant',
-      'Code Helper',
-      'Creative Writer',
-      'Data Analyst',
-      'Customer Support',
-      'Language Tutor'
-    ];
-    
-    const mockData = [];
-    
-    // Generate some random activities
-    for (let i = 0; i < 25; i++) {
-      const userIndex = type === 'personal' ? 0 : Math.floor(Math.random() * users.length);
-      const actionIndex = Math.floor(Math.random() * actions.length);
-      const action = actions[actionIndex];
-      
-      let details = '';
-      if (action.includes('GPT')) {
-        const gptName = gptNames[Math.floor(Math.random() * gptNames.length)];
-        details = `"${gptName}" GPT`;
-      } else if (action.includes('team member')) {
-        details = users[Math.floor(Math.random() * users.length)].name;
-      } else if (action.includes('permissions')) {
-        details = `for ${users[Math.floor(Math.random() * users.length)].name}`;
-      } else {
-        details = 'Global settings';
-      }
-      
-      // Generate a random date within the last 45 days
-      const now = new Date();
-      const daysAgo = Math.floor(Math.random() * 45);
-      const hoursAgo = Math.floor(Math.random() * 24);
-      const minutesAgo = Math.floor(Math.random() * 60);
-      const timestamp = new Date(now);
-      timestamp.setDate(timestamp.getDate() - daysAgo);
-      timestamp.setHours(timestamp.getHours() - hoursAgo);
-      timestamp.setMinutes(timestamp.getMinutes() - minutesAgo);
-      
-      mockData.push({
-        id: i + 1,
-        user: users[userIndex],
-        action,
-        details,
-        timestamp: timestamp.toISOString(),
-      });
-    }
-    
-    // Sort by timestamp, most recent first
-    return mockData.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   };
 
   // Format the timestamp
@@ -264,6 +271,9 @@ const HistoryPage = () => {
     window.history.replaceState(null, '', newUrl);
   }, [viewType]);
 
+  // Determine if team view is available
+  const isTeamViewAvailable = user?.role === 'admin';
+
   // CSS for hiding scrollbars
   const scrollbarHideStyles = `
     .hide-scrollbar::-webkit-scrollbar {
@@ -303,12 +313,15 @@ const HistoryPage = () => {
               <span>Personal</span>
             </button>
             <button
-              onClick={() => setViewType('team')}
+              onClick={() => isTeamViewAvailable ? setViewType('team') : null}
               className={`flex items-center px-3 py-1.5 rounded text-sm transition-all ${
                 viewType === 'team'
                   ? 'bg-gray-300 dark:bg-gray-700 text-gray-900 dark:text-white font-medium'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-800'
+                  : isTeamViewAvailable 
+                    ? 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-800'
+                    : 'text-gray-400 dark:text-gray-600 cursor-not-allowed'
               }`}
+              title={isTeamViewAvailable ? 'View team history' : 'Requires admin privileges'}
             >
               <IoPeopleOutline size={16} className="mr-1.5" />
               <span>Team</span>
@@ -410,11 +423,18 @@ const HistoryPage = () => {
               {filteredActivities.map((activity) => (
                 <div 
                   key={activity.id} 
-                  className="relative bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-750 border border-gray-300 dark:border-gray-700 rounded-lg p-4 ml-4 transition-colors"
+                  className={`relative bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-750 border border-gray-300 dark:border-gray-700 rounded-lg p-4 ml-4 transition-colors ${
+                    activity.type === 'chat' ? 'cursor-pointer' : ''
+                  }`}
+                  onClick={() => activity.type === 'chat' && activity.conversation && handleChatHistoryClick(activity.conversation)}
                 >
                   {/* Timeline marker dot */}
                   <div className="absolute -left-[10px] top-[50%] transform -translate-y-1/2 flex items-center justify-center w-5 h-5 rounded-full bg-gray-200 dark:bg-gray-700 border-2 border-gray-300 dark:border-gray-600">
-                    <IoEllipse size={6} className="text-gray-500 dark:text-gray-400"/> 
+                    {activity.type === 'chat' ? (
+                      <IoChatbubblesOutline size={10} className="text-blue-500"/> 
+                    ) : (
+                      <IoEllipse size={6} className="text-gray-500 dark:text-gray-400"/> 
+                    )}
                   </div>
                   
                   {/* Activity content */}
@@ -424,7 +444,10 @@ const HistoryPage = () => {
                         <div className="mb-1.5 flex items-center">
                           <span 
                             className="font-semibold text-gray-900 dark:text-white cursor-pointer hover:underline"
-                            onClick={() => navigate(`/admin/history/user/${activity.user.id}?view=${viewType}`)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/admin/history/user/${activity.user.id}?view=${viewType}`);
+                            }}
                           >
                             {activity.user.name}
                           </span>
@@ -437,6 +460,19 @@ const HistoryPage = () => {
                           <> <span className="font-medium text-gray-900 dark:text-white">{activity.details}</span></>
                         )}
                       </p>
+                      
+                      {/* Preview for chat conversations */}
+                      {activity.type === 'chat' && activity.conversation?.messages && activity.conversation.messages.length > 0 && (
+                        <div className="mt-2 bg-gray-200 dark:bg-gray-700 rounded p-2 text-xs text-gray-600 dark:text-gray-300">
+                          <div className="line-clamp-1">
+                            <span className="font-semibold">Last message: </span>
+                            {activity.conversation.lastMessage || activity.conversation.messages[activity.conversation.messages.length - 1].content.substring(0, 50)}
+                          </div>
+                          <div className="mt-1 text-gray-500 dark:text-gray-400 text-[10px]">
+                            Click to continue conversation
+                          </div>
+                        </div>
+                      )}
                     </div>
                     
                     <div className="text-xs text-gray-500 dark:text-gray-500 whitespace-nowrap">
