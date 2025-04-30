@@ -4,7 +4,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import ChatInput from './ChatInput';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { IoPersonCircleOutline, IoSettingsOutline, IoPersonOutline, IoArrowBack, IoSparkles } from 'react-icons/io5';
+import { IoPersonCircleOutline, IoSettingsOutline, IoPersonOutline, IoArrowBack, IoSparkles, IoAddCircleOutline } from 'react-icons/io5';
 import { axiosInstance } from '../../api/axiosInstance';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -36,6 +36,7 @@ const UserChat = () => {
     const [userDocuments, setUserDocuments] = useState([]);
     const [hasInteracted, setHasInteracted] = useState(false);
     const [conversationMemory, setConversationMemory] = useState([]);
+    const [shouldLoadHistory, setShouldLoadHistory] = useState(false);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -96,6 +97,10 @@ const UserChat = () => {
             return;
         }
         
+        // Check if we should load history based on URL
+        const fromHistory = location.state?.fromHistory || location.search.includes('loadHistory=true');
+        setShouldLoadHistory(fromHistory);
+        
         const fetchGptData = async () => {
             try {
                 setLoading(prev => ({ ...prev, gpt: true }));
@@ -125,6 +130,11 @@ const UserChat = () => {
                     } catch (notifyErr) {
                         console.warn("Error preparing GPT notification:", notifyErr);
                     }
+                    
+                    // Only load history if coming from history page
+                    if (fromHistory && user?._id) {
+                        await loadChatHistory(gptDataId);
+                    }
                 } else {
                     // Handle case where the API returned success: false or missing customGpt
                     console.warn("Failed to load GPT data or invalid response format:", response.data);
@@ -139,11 +149,11 @@ const UserChat = () => {
                     
                     // Set a fallback collection name
                     setCollectionName(`kb_user_${gptId}`);
-                }
-                
-                // Load history ONCE, after GPT data is set (success or fallback)
-                if (user?._id) {
-                    await loadChatHistory(gptDataId);
+                    
+                    // Only load history if coming from history page
+                    if (fromHistory && user?._id) {
+                        await loadChatHistory(gptId);
+                    }
                 }
             } catch (err) {
                 console.error("Error fetching GPT data:", err);
@@ -159,8 +169,8 @@ const UserChat = () => {
                 // Set a fallback collection name
                 setCollectionName(`kb_user_${gptId}`);
                 
-                // Still try to load history with the gptId as fallback
-                if (user?._id) {
+                // Only load history if coming from history page
+                if (fromHistory && user?._id) {
                     await loadChatHistory(gptId);
                 }
             } finally {
@@ -169,7 +179,7 @@ const UserChat = () => {
         };
         
         fetchGptData();
-    }, [gptId, userData, user]);
+    }, [gptId, userData, user, location]);
 
     const predefinedPrompts = [
         {
@@ -677,24 +687,51 @@ const UserChat = () => {
         setUploadedFiles(prevFiles => prevFiles.filter((_, index) => index !== indexToRemove));
     };
 
+    // Add a function to handle starting a new chat
+    const handleNewChat = () => {
+        setMessages([]);
+        setConversationMemory([]);
+        setHasInteracted(false);
+        setUserDocuments([]);
+        setUploadedFiles([]);
+    };
+
     return (
         <div className={`flex flex-col h-screen overflow-hidden transition-colors duration-300 ${
             isDarkMode ? 'bg-black text-white' : 'bg-gray-100 text-gray-900'
         }`}>
-            <div className={`flex-shrink-0 px-4 py-3 flex items-center justify-between  ${
+            <div className={`flex-shrink-0 px-4 py-3 flex items-center justify-between ${
                 isDarkMode ? 'bg-black border-gray-800' : 'bg-gray-100 border-gray-200'
             }`}>
-                <div className="w-10 h-10">
+                <div className="flex items-center space-x-2">
                     {gptId && (
                         <button 
                             onClick={handleGoBack}
-                            className={`p-2 rounded-full transition-colors flex items-center justify-center w-full h-full ${
+                            className={`p-2 rounded-full transition-colors flex items-center justify-center w-10 h-10 ${
                                 isDarkMode ? 'text-gray-400 hover:text-white hover:bg-gray-800' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'
                             }`}
                             aria-label="Go back"
                         >
                             <IoArrowBack size={20} />
                         </button>
+                    )}
+                    
+                    {/* New Chat Button */}
+                    <button 
+                        onClick={handleNewChat}
+                        className={`p-2 rounded-full transition-colors flex items-center justify-center w-10 h-10 ${
+                            isDarkMode ? 'text-gray-400 hover:text-white hover:bg-gray-800' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'
+                        }`}
+                        aria-label="New Chat"
+                    >
+                        <IoAddCircleOutline size={24} />
+                    </button>
+                    
+                    {/* Show the GPT name when it's available */}
+                    {gptData && (
+                        <div className="ml-2 text-sm md:text-base font-medium truncate max-w-[150px] md:max-w-xs">
+                            {gptData.name}
+                        </div>
                     )}
                 </div>
                 

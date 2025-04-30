@@ -15,7 +15,9 @@ const ConversationItem = memo(({ conv, formatTimestamp, onDelete, isDarkMode, na
                 ? 'bg-gray-800/50 border-gray-700 hover:bg-gray-700/70 hover:border-gray-600' 
                 : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300'
         }`}
-        onClick={() => navigate(`/user/chat?gptId=${conv.gptId}`)}
+        onClick={() => navigate(`/user/chat?gptId=${conv.gptId}&loadHistory=true`, {
+            state: { fromHistory: true }
+        })}
     >
         <div className="flex items-center justify-between mb-2">
             <h3 className={`font-semibold truncate mr-4 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>{conv.gptName}</h3>
@@ -285,6 +287,12 @@ const HistoryPage = () => {
         setLoading(true);
         fetchConversationHistory();
     }, [fetchConversationHistory]);
+
+    const handleContinueConversation = useCallback((conv) => {
+        navigate(`/user/chat?gptId=${conv.gptId}&loadHistory=true`, {
+            state: { fromHistory: true }
+        });
+    }, [navigate]);
 
     if (!user?._id) {
         return (
