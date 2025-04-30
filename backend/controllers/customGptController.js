@@ -420,8 +420,8 @@ const deleteKnowledgeFile = async (req, res) => {
 
 const getAllCustomGpts = async (req, res) => {
   try {
-     
-    const filter = {};
+    // Only show GPTs created by the admin (current user)
+    const filter = { createdBy: req.user._id };
 
     const customGpts = await CustomGpt.find(filter); 
     res.status(200).json({
