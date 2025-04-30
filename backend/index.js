@@ -10,6 +10,7 @@ const connectDB = require('./lib/db');
 const customGptRoutes = require('./routes/customGptRoutes');
 const authRoutes = require('./routes/authRoutes');
 const invitationRoutes = require('./routes/invitationRoutes');
+const chatHistoryRoutes = require('./routes/chatHistory');
 
 require('./config/passport');
 
@@ -41,6 +42,7 @@ app.get("/health", (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/auth', invitationRoutes);
 app.use('/api/custom-gpts', customGptRoutes);
+app.use('/api/chat-history', chatHistoryRoutes);
 
 connectDB()
   .then(() => console.log('MongoDB connected at server startup'))

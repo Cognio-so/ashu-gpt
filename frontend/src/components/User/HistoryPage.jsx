@@ -1,72 +1,21 @@
-import React, { useState, useEffect, useMemo, useCallback, memo } from 'react';
-import { FiSearch, FiMessageSquare, FiClock, FiCalendar, FiTrash2, FiXCircle, FiExternalLink } from 'react-icons/fi';
-import { IoEllipse } from 'react-icons/io5';
+import React, { useState, useEffect, useMemo, useCallback, memo, useRef } from 'react';
+import { FiSearch, FiMessageSquare, FiClock, FiCalendar, FiTrash2, FiXCircle, FiExternalLink, FiArrowRight } from 'react-icons/fi';
+import { IoEllipse, IoPersonCircleOutline, IoSparkles, IoClose } from 'react-icons/io5';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../../context/ThemeContext';
-
-// Mock data moved outside component to prevent recreation on each render
-const mockConversations = [
-    {
-        id: 'conv1',
-        gptId: 'gpt1',
-        gptName: 'Customer Support Assistant',
-        lastMessage: 'How can I request a refund for my recent purchase?',
-        timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
-        messageCount: 12,
-        model: 'GPT-4',
-        summary: 'Discussion about refund policies and procedures'
-    },
-    {
-        id: 'conv2',
-        gptId: 'gpt2',
-        gptName: 'Product Recommendation Agent',
-        lastMessage: 'I need a new laptop for video editing under $1500',
-        timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // 2 days ago
-        messageCount: 8,
-        model: 'GPT-3.5',
-        summary: 'Recommendations for video editing laptops'
-    },
-    {
-        id: 'conv3',
-        gptId: 'gpt3',
-        gptName: 'Content Writing Assistant',
-        lastMessage: 'Can you help me write a blog post about artificial intelligence?',
-        timestamp: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), // 1 week ago
-        messageCount: 15,
-        model: 'GPT-4',
-        summary: 'Creating a blog post about AI advancements'
-    },
-    {
-        id: 'conv4',
-        gptId: 'gpt4',
-        gptName: 'Travel Planning Assistant',
-        lastMessage: 'I want to plan a 2-week trip to Japan in the spring',
-        timestamp: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000), // 2 weeks ago
-        messageCount: 22,
-        model: 'GPT-4',
-        summary: 'Planning a comprehensive trip to Japan'
-    },
-    {
-        id: 'conv5',
-        gptId: 'gpt5',
-        gptName: 'Health & Fitness Coach',
-        lastMessage: 'What exercises are best for improving core strength?',
-        timestamp: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 1 month ago
-        messageCount: 7,
-        model: 'GPT-3.5',
-        summary: 'Discussion about core strength exercises'
-    }
-];
+import { axiosInstance } from '../../api/axiosInstance';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 // Memoized Conversation Item Component
-const ConversationItem = memo(({ conv, formatTimestamp, onContinue, onDelete, isDarkMode }) => (
+const ConversationItem = memo(({ conv, formatTimestamp, onDelete, isDarkMode, navigate }) => (
     <div 
         className={`p-4 rounded-lg border mb-3 cursor-pointer transition-all group ${
             isDarkMode 
                 ? 'bg-gray-800/50 border-gray-700 hover:bg-gray-700/70 hover:border-gray-600' 
                 : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300'
         }`}
-        onClick={() => onContinue(conv)}
+        onClick={() => navigate(`/user/chat?gptId=${conv.gptId}`)}
     >
         <div className="flex items-center justify-between mb-2">
             <h3 className={`font-semibold truncate mr-4 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>{conv.gptName}</h3>
@@ -102,6 +51,60 @@ const ConversationItem = memo(({ conv, formatTimestamp, onContinue, onDelete, is
     </div>
 ));
 
+// New component to display a single message
+const MessageItem = memo(({ message, isDarkMode, userProfilePic, gptImageUrl }) => (
+    <div className={`flex items-start mb-4 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+        {message.role === 'assistant' && (
+            <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center mr-2 ${isDarkMode ? 'bg-gray-700' : 'bg-gray-300'}`}>
+                {gptImageUrl ? (
+                    <img src={gptImageUrl} alt="GPT" className="w-full h-full rounded-full object-cover" />
+                ) : (
+                    <IoSparkles size={16} className={isDarkMode ? 'text-blue-400' : 'text-blue-600'} />
+                )}
+            </div>
+        )}
+        <div 
+            className={`max-w-[80%] p-3 rounded-lg ${
+                message.role === 'user' 
+                    ? (isDarkMode ? 'bg-blue-600 text-white ml-2' : 'bg-blue-500 text-white ml-2') 
+                    : (isDarkMode ? 'bg-gray-700 text-gray-100' : 'bg-gray-200 text-gray-800')
+            }`}
+        >
+            <ReactMarkdown 
+                remarkPlugins={[remarkGfm]}
+                components={{
+                    p: ({node, children}) => <p className="mb-2 last:mb-0">{children}</p>,
+                    a: ({node, ...props}) => <a className="text-blue-400 hover:underline" {...props} />,
+                    code({node, inline, className, children, ...props}) {
+                        return inline ? (
+                            <code className={`px-1 rounded ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'} ${className}`} {...props}>
+                                {children}
+                            </code>
+                        ) : (
+                            <pre className={`p-2 rounded overflow-x-auto my-2 text-sm ${isDarkMode ? 'bg-black/30' : 'bg-gray-100'} ${className}`} {...props}>
+                                <code>{children}</code>
+                            </pre>
+                        );
+                    }
+                }}
+            >
+                {message.content}
+            </ReactMarkdown>
+        </div>
+        {message.role === 'user' && (
+            <div className={`flex-shrink-0 w-8 h-8 rounded-full overflow-hidden border ml-2 ${isDarkMode ? 'border-white/20 bg-gray-700' : 'border-gray-300 bg-gray-300'}`}>
+                {userProfilePic ? (
+                    <img src={userProfilePic} alt="You" className="w-full h-full object-cover" />
+                ) : (
+                    <div className={`w-full h-full flex items-center justify-center`}>
+                        <IoPersonCircleOutline size={16} className={isDarkMode ? 'text-gray-300' : 'text-gray-600'} />
+                    </div>
+                )}
+            </div>
+        )}
+    </div>
+));
+
 const HistoryPage = () => {
     const [conversations, setConversations] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -110,26 +113,83 @@ const HistoryPage = () => {
     const [filterPeriod, setFilterPeriod] = useState('all');
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [selectedConversation, setSelectedConversation] = useState(null);
+    const [conversationMessages, setConversationMessages] = useState([]);
+    const [loadingMessages, setLoadingMessages] = useState(false);
+    const messagesEndRef = useRef(null);
     const navigate = useNavigate();
     const { isDarkMode } = useTheme();
+    const user = JSON.parse(localStorage.getItem('user'));
     
+    // Scroll to bottom when viewing conversation
     useEffect(() => {
-        const fetchConversationHistory = async () => {
-            try {
-                setLoading(true);
-                setError(null);
-                await new Promise(resolve => setTimeout(resolve, 500)); 
-                setConversations(mockConversations);
-            } catch (error) {
-                console.error("Error fetching conversation history:", error);
-                setError("Failed to load your conversation history");
-            } finally {
-                setLoading(false);
+        if (messagesEndRef.current) {
+            messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+        }
+    }, [conversationMessages]);
+    
+    // Memoize the fetch function to prevent unnecessary recreations
+    const fetchConversationHistory = useCallback(async () => {
+        try {
+            setError(null);
+            const response = await axiosInstance.get(`/api/chat-history/user/${user._id}`, {
+                withCredentials: true
+            });
+            
+            if (response.data && response.data.success) {
+                const formattedConversations = response.data.conversations.map(conv => ({
+                    id: conv._id,
+                    gptId: conv.gptId,
+                    gptName: conv.gptName,
+                    lastMessage: conv.lastMessage,
+                    timestamp: new Date(conv.updatedAt),
+                    messageCount: conv.messages?.length || 0,
+                    model: conv.model,
+                    summary: conv.summary,
+                    messages: conv.messages || []
+                }));
+                setConversations(formattedConversations);
+            } else {
+                throw new Error('Failed to fetch conversations');
             }
-        };
+        } catch (error) {
+            console.error("Error fetching conversation history:", error);
+            setError("Failed to load your conversation history");
+        } finally {
+            setLoading(false);
+        }
+    }, [user?._id]);
+    
+    // Function to fetch full conversation details
+    const fetchConversationDetails = useCallback(async (conversationId) => {
+        if (!user?._id || !conversationId) return;
         
-        fetchConversationHistory();
-    }, []);
+        try {
+            setLoadingMessages(true);
+            const response = await axiosInstance.get(`/api/chat-history/conversation/${user._id}/${conversationId}`, {
+                withCredentials: true
+            });
+            
+            if (response.data && response.data.success) {
+                setConversationMessages(response.data.conversation.messages || []);
+            } else {
+                throw new Error('Failed to fetch conversation details');
+            }
+        } catch (error) {
+            console.error("Error fetching conversation details:", error);
+            setConversationMessages([]);
+        } finally {
+            setLoadingMessages(false);
+        }
+    }, [user]);
+    
+    // Use the memoized fetch function in useEffect
+    useEffect(() => {
+        if (user?._id) {
+            fetchConversationHistory();
+        } else {
+            setLoading(false); // Set loading to false if no user
+        }
+    }, [user, fetchConversationHistory]);
     
     const filteredConversations = useMemo(() => {
         let filtered = [...conversations];
@@ -186,22 +246,32 @@ const HistoryPage = () => {
         }
     }, []);
     
-    const handleContinueConversation = useCallback((conv) => {
-        navigate(`/user/chat?gptId=${conv.gptId}`);
-    }, [navigate]);
-    
     const confirmDeleteConversation = useCallback((conv, e) => {
         e.stopPropagation();
         setSelectedConversation(conv);
         setShowDeleteConfirm(true);
     }, []);
     
-    const handleDeleteConversation = useCallback(() => {
-        if (!selectedConversation) return;
-        setConversations(prev => prev.filter(c => c.id !== selectedConversation.id));
-        setShowDeleteConfirm(false);
-        setSelectedConversation(null);
-    }, [selectedConversation]);
+    const handleDeleteConversation = useCallback(async () => {
+        if (!selectedConversation || !user?._id) return;
+        
+        try {
+            const response = await axiosInstance.delete(
+                `/api/chat-history/${user._id}/${selectedConversation.id}`,
+                { withCredentials: true }
+            );
+            
+            if (response.data && response.data.success) {
+                setConversations(prev => prev.filter(c => c.id !== selectedConversation.id));
+                setShowDeleteConfirm(false);
+                setSelectedConversation(null);
+            } else {
+                throw new Error('Failed to delete conversation');
+            }
+        } catch (error) {
+            console.error('Error deleting conversation:', error);
+        }
+    }, [selectedConversation, user]);
     
     const cancelDelete = useCallback(() => {
         setShowDeleteConfirm(false);
@@ -213,17 +283,35 @@ const HistoryPage = () => {
 
     const handleRetry = useCallback(() => {
         setLoading(true);
-        setError(null);
-        setTimeout(() => {
-            setConversations(mockConversations);
-            setLoading(false);
-        }, 500);
-    }, []);
+        fetchConversationHistory();
+    }, [fetchConversationHistory]);
 
-    if (loading && conversations.length === 0 && !error) {
+    if (!user?._id) {
         return (
-            <div className={`flex items-center justify-center h-full ${isDarkMode ? 'bg-black text-white' : 'bg-gray-50 text-gray-700'}`}>
-                <div className={`animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 ${isDarkMode ? 'border-blue-500' : 'border-blue-600'}`}></div>
+            <div className={`flex flex-col items-center justify-center h-full ${
+                isDarkMode ? 'bg-black text-white' : 'bg-gray-50 text-gray-900'
+            }`}>
+                <p className="text-lg mb-4">Please log in to view your conversation history</p>
+                <button
+                    onClick={() => navigate('/login')}
+                    className={`px-4 py-2 rounded-lg transition-colors text-white ${
+                        isDarkMode ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-500 hover:bg-blue-600'
+                    }`}
+                >
+                    Log In
+                </button>
+            </div>
+        );
+    }
+
+    if (loading && conversations.length === 0) {
+        return (
+            <div className={`flex items-center justify-center h-full ${
+                isDarkMode ? 'bg-black text-white' : 'bg-gray-50 text-gray-700'
+            }`}>
+                <div className={`animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 ${
+                    isDarkMode ? 'border-blue-500' : 'border-blue-600'
+                }`}></div>
             </div>
         );
     }
@@ -338,15 +426,16 @@ const HistoryPage = () => {
                                 key={conv.id} 
                                 conv={conv} 
                                 formatTimestamp={formatTimestamp} 
-                                onContinue={handleContinueConversation} 
                                 onDelete={confirmDeleteConversation}
                                 isDarkMode={isDarkMode}
+                                navigate={navigate}
                             />
                         ))}
                     </div>
                 )}
             </div>
 
+            {/* Delete Confirmation Modal */}
             {showDeleteConfirm && selectedConversation && (
                 <div className="fixed inset-0 bg-black/60 dark:bg-black/80 flex items-center justify-center z-50 p-4">
                     <div className={`p-6 rounded-lg shadow-xl w-full max-w-sm border ${

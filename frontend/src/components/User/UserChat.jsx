@@ -21,8 +21,11 @@ const UserChat = () => {
     const { isDarkMode } = useTheme();
     const [isProfileOpen, setIsProfileOpen] = useState(false);
     const [userData, setUserData] = useState(null);
-    const [isLoading, setIsLoading] = useState(false);
-    const [isFetchingGpt, setIsFetchingGpt] = useState(false);
+    const [loading, setLoading] = useState({
+        gpt: false,
+        history: false,
+        message: false
+    });
     const [gptData, setGptData] = useState(null);
     const [messages, setMessages] = useState([]);
     const messagesEndRef = useRef(null);
@@ -44,6 +47,48 @@ const UserChat = () => {
         }
     }, [user]);
     
+    const loadChatHistory = async (id) => {
+        if (!id || !user?._id) return;
+        
+        try {
+            setLoading(prev => ({ ...prev, history: true }));
+            
+            const response = await axiosInstance.get(`/api/chat-history/conversation/${user._id}/${id}`, {
+                withCredentials: true
+            });
+            
+            if (response.data && response.data.success && response.data.conversation) {
+                const { conversation } = response.data;
+                
+                // Only populate if we have messages
+                if (conversation.messages && conversation.messages.length > 0) {
+                    // Format messages for display
+                    const formattedMessages = conversation.messages.map((msg, index) => ({
+                        id: Date.now() - (conversation.messages.length - index),
+                        role: msg.role,
+                        content: msg.content,
+                        timestamp: new Date(msg.timestamp || conversation.createdAt)
+                    }));
+                    
+                    setMessages(formattedMessages);
+                    
+                    // Update conversation memory for context
+                    setConversationMemory(conversation.messages.slice(-10).map(msg => ({
+                        role: msg.role,
+                        content: msg.content,
+                        timestamp: msg.timestamp || conversation.createdAt
+                    })));
+                    
+                    console.log(`Loaded ${formattedMessages.length} messages from conversation history`);
+                }
+            }
+        } catch (error) {
+            console.error("Error loading conversation history:", error);
+        } finally {
+            setLoading(prev => ({ ...prev, history: false }));
+        }
+    };
+
     useEffect(() => {
         if (!gptId) {
             setGptData(null);
@@ -53,25 +98,28 @@ const UserChat = () => {
         
         const fetchGptData = async () => {
             try {
-                setIsFetchingGpt(true);
-                setMessages([]);
+                setLoading(prev => ({ ...prev, gpt: true }));
                 
                 const response = await axiosInstance.get(`/api/custom-gpts/user/assigned/${gptId}`, { 
                     withCredentials: true 
                 });
                 
+                let gptDataId = gptId; // Default fallback ID
+                
                 if (response.data && response.data.success && response.data.customGpt) {
-                    setGptData(response.data.customGpt);
+                    const customGpt = response.data.customGpt;
+                    setGptData(customGpt);
+                    gptDataId = customGpt._id; // Set the actual ID from response
                     
                     // Create a collection name for RAG
                     const sanitizedEmail = (userData?.email || 'user').replace(/[^a-zA-Z0-9]/g, '_');
-                    const sanitizedGptName = (response.data.customGpt.name || 'gpt').replace(/[^a-zA-Z0-9]/g, '_');
+                    const sanitizedGptName = (customGpt.name || 'gpt').replace(/[^a-zA-Z0-9]/g, '_');
                     const collectionName = `kb_${sanitizedEmail}_${sanitizedGptName}_${gptId}`;
                     setCollectionName(collectionName);
                     
                     // Try to notify backend (non-blocking)
                     try {
-                        notifyGptOpened(response.data.customGpt, userData)
+                        notifyGptOpened(customGpt, userData)
                             .then(result => console.log("GPT opened notification result:", result))
                             .catch(notifyErr => console.warn("Failed to notify GPT opened:", notifyErr));
                     } catch (notifyErr) {
@@ -92,6 +140,11 @@ const UserChat = () => {
                     // Set a fallback collection name
                     setCollectionName(`kb_user_${gptId}`);
                 }
+                
+                // Load history ONCE, after GPT data is set (success or fallback)
+                if (user?._id) {
+                    await loadChatHistory(gptDataId);
+                }
             } catch (err) {
                 console.error("Error fetching GPT data:", err);
                 
@@ -105,14 +158,19 @@ const UserChat = () => {
                 
                 // Set a fallback collection name
                 setCollectionName(`kb_user_${gptId}`);
+                
+                // Still try to load history with the gptId as fallback
+                if (user?._id) {
+                    await loadChatHistory(gptId);
+                }
             } finally {
-                setIsFetchingGpt(false);
+                setLoading(prev => ({ ...prev, gpt: false }));
             }
         };
         
         fetchGptData();
-    }, [gptId, userData]);
-    
+    }, [gptId, userData, user]);
+
     const predefinedPrompts = [
         {
             id: 1,
@@ -135,6 +193,44 @@ const UserChat = () => {
         handleChatSubmit(item.prompt);
     };
 
+    const saveMessageToHistory = async (message, role) => {
+        try {
+            if (!user?._id || !gptData || !message || !message.trim()) {
+                console.warn('Cannot save message - missing data:', { 
+                    userId: user?._id, 
+                    gptId: gptData?._id,
+                    hasMessage: !!message,
+                    role
+                });
+                return null;
+            }
+
+            console.log(`Attempting to save ${role} message to history:`, message.substring(0, 30) + '...');
+            
+            const payload = {
+                userId: user._id,
+                gptId: gptData._id,
+                gptName: gptData.name || 'AI Assistant',
+                message: message.trim(),
+                role: role,
+                model: gptData.model || 'gpt-4o-mini'
+            };
+            
+            console.log('Save message payload:', payload);
+
+            const response = await axiosInstance.post('/api/chat-history/save', payload, {
+                withCredentials: true
+            });
+
+            console.log(`${role.toUpperCase()} message saved successfully:`, response.data);
+            return response.data;
+        } catch (error) {
+            console.error(`Error saving ${role} message to history:`, error.response?.data || error.message);
+            // Return null instead of throwing to prevent breaking the chat flow
+            return null;
+        }
+    };
+
     const handleChatSubmit = async (message) => {
         if (!message.trim()) return;
 
@@ -148,8 +244,16 @@ const UserChat = () => {
             timestamp: new Date()
         };
         
+        // Save user message to history first
+        try {
+            await saveMessageToHistory(message, 'user');
+            console.log('User message saved to history:', message.substring(0, 50) + '...');
+        } catch (error) {
+            console.error('Error saving user message:', error);
+        }
+        
         setMessages(prev => [...prev, userMessage]);
-        setIsLoading(true);
+        setLoading(prev => ({ ...prev, message: true }));
 
         try {
             // Update conversation memory with relevant context
@@ -181,7 +285,7 @@ const UserChat = () => {
                 use_hybrid_search: gptData?.capabilities?.hybridSearch || false
             };
 
-            // Try streaming first - same as AdminChat
+            // Try streaming first
             try {
                 const response = await fetch(`${backendUrl}/chat-stream`, {
                     method: "POST",
@@ -192,8 +296,7 @@ const UserChat = () => {
                 });
                 
                 if (response.ok) {
-                    // FIXED: Properly handle streaming response
-                    await handleStreamingResponse(response);
+                    await handleStreamingResponse(response, saveMessageToHistory);
                 } else {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -211,16 +314,23 @@ const UserChat = () => {
                     }
                 );
                 
-                // FIXED: Use the actual response from the API
                 if (fallbackResponse.data && fallbackResponse.data.success && fallbackResponse.data.response) {
-                    const aiResponse = {
+                    const assistantMessage = {
                         id: Date.now() + 1,
                         role: 'assistant',
                         content: fallbackResponse.data.response,
                         timestamp: new Date()
                     };
                     
-                    setMessages(prev => [...prev, aiResponse]);
+                    setMessages(prev => [...prev, assistantMessage]);
+                    
+                    // Save assistant message to history
+                    try {
+                        await saveMessageToHistory(assistantMessage.content, 'assistant');
+                        console.log('Assistant message saved to history (fallback):', assistantMessage.content.substring(0, 50) + '...');
+                    } catch (error) {
+                        console.error('Error saving assistant message (fallback):', error);
+                    }
                 } else {
                     throw new Error("Invalid response from server");
                 }
@@ -235,16 +345,25 @@ const UserChat = () => {
                 isError: true
             };
             setMessages(prev => [...prev, errorMessage]);
+            
+            // Save error message to history
+            try {
+                await saveMessageToHistory(errorMessage.content, 'assistant');
+                console.log('Error message saved to history');
+            } catch (error) {
+                console.error('Error saving error message:', error);
+            }
         } finally {
-            setIsLoading(false);
+            setLoading(prev => ({ ...prev, message: false }));
         }
     };
 
-    // Add this function to handle streaming responses (copied from AdminChat)
-    const handleStreamingResponse = async (response) => {
+    // Fix the handleStreamingResponse function to properly save assistant messages
+    const handleStreamingResponse = async (response, saveMessageToHistory) => {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let streamingMessageId = Date.now() + 1;
+        let completeContent = ''; // Track the complete message content
         
         // Create initial streaming message
         const initialMessage = {
@@ -262,15 +381,28 @@ const UserChat = () => {
                 const { done, value } = await reader.read();
                 
                 if (done) {
-                    // Also update conversation memory when streaming completes
-                    const completedMessage = messages.find(msg => msg.id === streamingMessageId);
-                    if (completedMessage) {
-                        setConversationMemory(prev => [...prev, {
-                            role: 'assistant',
-                            content: completedMessage.content,
-                            timestamp: new Date().toISOString()
-                        }]);
+                    // Explicitly log the complete content to debug
+                    console.log('Stream complete, saving assistant message:', completeContent.substring(0, 50) + '...');
+                    
+                    // Save the complete message to history - IMPORTANT FIX HERE
+                    if (completeContent && completeContent.trim()) {
+                        try {
+                            // Make sure this call happens and isn't blocked
+                            const saveResult = await saveMessageToHistory(completeContent, 'assistant');
+                            console.log('Assistant message saved result:', saveResult);
+                        } catch (saveError) {
+                            console.error('Failed to save assistant message:', saveError);
+                        }
+                    } else {
+                        console.warn('No content to save for assistant message');
                     }
+                    
+                    // Update the conversation memory only after saving
+                    setConversationMemory(prev => [...prev, {
+                        role: 'assistant',
+                        content: completeContent,
+                        timestamp: new Date().toISOString()
+                    }]);
                     
                     // Mark streaming as complete
                     setMessages(prev => prev.map(msg => 
@@ -290,15 +422,27 @@ const UserChat = () => {
                             
                             if (parsed.error) {
                                 console.error("Streaming Error:", parsed.error);
+                                const errorContent = `Error: ${parsed.error}`;
                                 setMessages(prev => prev.map(msg => 
                                     msg.id === streamingMessageId ? 
-                                    { ...msg, content: `Error: ${parsed.error}`, isStreaming: false } : 
+                                    { ...msg, content: errorContent, isStreaming: false } : 
                                     msg
                                 ));
+                                await saveMessageToHistory(errorContent, 'assistant');
                                 return;
                             }
                             
                             if (parsed.done === true) {
+                                // Make sure we save the message before marking as done
+                                if (completeContent && completeContent.trim()) {
+                                    try {
+                                        await saveMessageToHistory(completeContent, 'assistant');
+                                        console.log('Assistant message saved on done signal');
+                                    } catch (saveError) {
+                                        console.error('Failed to save assistant message on done:', saveError);
+                                    }
+                                }
+                                
                                 setMessages(prev => prev.map(msg => 
                                     msg.id === streamingMessageId ? { ...msg, isStreaming: false } : msg
                                 ));
@@ -306,6 +450,7 @@ const UserChat = () => {
                             }
                             
                             if (parsed.content) {
+                                completeContent += parsed.content; // Add to complete content
                                 setMessages(prev => prev.map(msg => 
                                     msg.id === streamingMessageId ? 
                                     { ...msg, content: msg.content + parsed.content } : 
@@ -320,11 +465,13 @@ const UserChat = () => {
             }
         } catch (err) {
             console.error("Error reading stream:", err);
+            const errorContent = "Error reading response stream.";
             setMessages(prev => prev.map(msg => 
                 msg.id === streamingMessageId ? 
-                { ...msg, content: "Error reading response stream.", isStreaming: false } : 
+                { ...msg, content: errorContent, isStreaming: false } : 
                 msg
             ));
+            await saveMessageToHistory(errorContent, 'assistant');
         }
     };
 
@@ -607,9 +754,12 @@ const UserChat = () => {
             
             <div className="flex-1 overflow-y-auto p-4 no-scrollbar">
                 <div className="w-full max-w-3xl mx-auto flex flex-col space-y-4">
-                    {isFetchingGpt ? (
-                        <div className={`flex-1 flex items-center justify-center ${isDarkMode ? 'bg-black text-white' : 'bg-gray-50 text-gray-700'}`}>
+                    {loading.gpt || loading.history ? (
+                        <div className={`flex-1 flex flex-col items-center justify-center ${isDarkMode ? 'bg-black text-white' : 'bg-gray-50 text-gray-700'}`}>
                             <div className={`animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 ${isDarkMode ? 'border-blue-500' : 'border-blue-600'}`}></div>
+                            <span className="mt-4 text-sm">
+                                {loading.gpt ? 'Loading assistant...' : 'Loading conversation...'}
+                            </span>
                         </div>
                     ) : messages.length === 0 ? (
                         <div className="flex-1 flex flex-col items-center justify-center text-center px-2 pt-8 pb-16">
@@ -756,7 +906,7 @@ const UserChat = () => {
                             </motion.div>
                         ))
                     )}
-                    {isLoading && !messages.some(msg => msg.isStreaming) && (
+                    {loading.message && !messages.some(msg => msg.isStreaming) && (
                         <div className="flex justify-start items-end space-x-2">
                             <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${isDarkMode ? 'bg-gray-700' : 'bg-gray-300'}`}>
                                 {gptData?.imageUrl ? (
@@ -838,7 +988,7 @@ const UserChat = () => {
                     <ChatInput 
                         onSubmit={handleChatSubmit} 
                         onFileUpload={handleFileUpload}
-                        isLoading={isLoading} 
+                        isLoading={loading.message} 
                         isDarkMode={isDarkMode} 
                         showWebSearch={showWebSearch}
                     />
