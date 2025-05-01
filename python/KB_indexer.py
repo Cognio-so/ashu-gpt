@@ -8,6 +8,7 @@ import logging
 import time
 from typing import List, Dict, Any, Optional
 from functools import lru_cache
+from datetime import datetime
 
 # Qdrant
 import qdrant_client
@@ -129,7 +130,6 @@ def process_single_file(file_url: str, splitter: RecursiveCharacterTextSplitter)
              logger.warning(f"Error extracting filename for {file_url}, using fallback. Error: {e}")
              filename = f"unknown_file_{time.time()}" # Generate a placeholder
 
-
         content = response.content
         if not content:
              logger.warning(f"Downloaded file {filename} ({file_url}) is empty. Skipping.")
@@ -140,6 +140,9 @@ def process_single_file(file_url: str, splitter: RecursiveCharacterTextSplitter)
         if extracted_text:
             # Use the splitter to create chunks
             chunks = splitter.split_text(extracted_text)
+            # Create timestamp for more precise sorting - use microsecond precision
+            current_time = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            
             # Create LangChain Document objects with metadata
             for i, chunk in enumerate(chunks):
                 doc = Document(
@@ -148,14 +151,14 @@ def process_single_file(file_url: str, splitter: RecursiveCharacterTextSplitter)
                         "source": file_url,
                         "filename": filename,
                         "chunk_index": i,
-                        "indexed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()) # Add timestamp
+                        "indexed_at": current_time,  # Use high-precision timestamp
+                        "upload_timestamp": int(time.time() * 1000)  # Add millisecond timestamp for sorting
                     }
                 )
                 documents.append(doc)
             logger.info(f"Successfully chunked {filename} into {len(documents)} documents.")
         else:
              logger.warning(f"No text could be extracted from {filename} ({file_url}).")
-
 
     except requests.exceptions.Timeout:
         logger.error(f"Timeout while downloading {file_url}")
@@ -438,14 +441,23 @@ def retrieve_documents(
         query_embedding = get_cached_embedding(query, openai_api_key)
         
         # Search for similar documents
-        retrieved_docs = vector_store.similarity_search(query, k=top_k)
+        retrieved_docs = vector_store.similarity_search(query, k=top_k * 2)  # Retrieve more documents than needed
+        
+        # Sort documents by indexed_at timestamp if available (newest first)
+        retrieved_docs.sort(
+            key=lambda doc: doc.metadata.get('indexed_at', '0000-00-00T00:00:00Z'),
+            reverse=True  # Newest first
+        )
+        
+        # Take only the top_k most relevant and recent documents
+        retrieved_docs = retrieved_docs[:top_k]
         
         # Add prefix to document content if provided
         if prefix:
             for doc in retrieved_docs:
                 doc.page_content = f"{prefix} {doc.page_content}"
         
-        logger.info(f"Retrieved {len(retrieved_docs)} documents from {collection_name}")
+        logger.info(f"Retrieved {len(retrieved_docs)} documents from {collection_name}, prioritizing recent documents")
         return retrieved_docs
         
     except Exception as e:
@@ -465,17 +477,17 @@ def get_cached_embedding(text, api_key):
 async def perform_rag_query_stream(
     query: str,
     base_collection_name: str,
-    user_collection_name: Optional[str], 
+    user_collection_name: Optional[str],
     qdrant_url: str,
     qdrant_api_key: Optional[str],
-    openai_api_key: Optional[str],
-    model_api_key: Optional[str] = None,
+    openai_api_key: Optional[str], # Key for embeddings (e.g., OpenAI)
+    model_api_key: Optional[str] = None, # Key for the specific LLM (e.g., Groq, Anthropic, Gemini)
     history: List[Dict[str, str]] = None,
     memory: List[Dict[str, str]] = None,
-    model: str = "gpt-4o-mini",
-    top_k: int = 5,  # Increased from 3 to 5
+    model: str = None, # Specific API model name (e.g., llama3-70b-8192, claude-3-opus...)
+    top_k: int = 5,
     use_hybrid_search: bool = False,
-    system_prompt: Optional[str] = None  # Add system prompt parameter
+    system_prompt: Optional[str] = None
 ) -> StreamingResponse:
     logger.info(f"Performing streaming RAG query using model: {model}")
     history = history or []
@@ -492,16 +504,22 @@ async def perform_rag_query_stream(
             memory_context += f"[{role}]: {content}\n"
         memory_context += "\n"
     
-    # Determine provider based on model name
-    provider = "openai"  # Default provider
-    if model.startswith("claude"):
+    # Determine provider based on model name (for potential specific logic)
+    provider = "unknown"
+    # NOTE: This logic needs refinement based on actual model names used
+    if model and model.startswith("gpt-"):
+        provider = "openai"
+    elif model and model.startswith("claude"):
         provider = "anthropic"
-    elif model.startswith("gemini"):
+    elif model and model.startswith("gemini"):
         provider = "google"
-    elif model.startswith("llama"):
-        provider = "meta"
-        
-    logger.info(f"Using {provider} provider for model: {model}")
+    elif model and ("llama" in model or "mixtral" in model): # Example check for Groq models
+        provider = "groq"
+    else:
+        provider = "openai" # Default assumption
+        logger.warning(f"Could not determine provider for model '{model}', assuming OpenAI.")
+
+    logger.info(f"Using {provider} provider logic for model: {model}")
     
     try:
         # Get documents from both collections if they exist
@@ -536,8 +554,12 @@ async def perform_rag_query_stream(
             except Exception as e:
                 logger.warning(f"Error retrieving from user collection: {str(e)}")
         
-        # Combine docs, prioritizing user docs
+        # Combine and sort docs by recency, still giving priority to user docs
         all_docs = user_docs + base_docs
+        all_docs.sort(
+            key=lambda doc: doc.metadata.get('upload_timestamp', 0),
+            reverse=True  # Newest first
+        )
         
         # Prepare context from retrieved documents without additional instructions
         context = ""
@@ -561,17 +583,17 @@ async def perform_rag_query_stream(
             messages.append({"role": "system", "content": system_prompt})
         # No else statement - only use system prompt if provided
         
-        # Add context to the user's actual query instead of as a separate message
+        # Generic prompt for all RAG use cases
         if context:
             user_query_with_context = f"""
 {query}
 
-Here is the ONLY relevant information to help answer my question:
+Here is the relevant information to help answer the question:
 {context}
 
-IMPORTANT: Only use the information provided above to answer the question. If the information provided is insufficient to answer the question completely, explicitly state what specific information is missing. DO NOT make up or hallucinate any information like names, statistics, or details that are not explicitly stated in the provided context.
-
-Please format your response using proper markdown.
+IMPORTANT:
+1. Only use the information provided above to answer the question
+2. Provide a well-structured response using proper markdown formatting
 """
             
             # Add conversation history
@@ -588,8 +610,8 @@ Please format your response using proper markdown.
             user_query_with_context = f"""
 {query}
 
-IMPORTANT: I could not find any relevant information in the provided documents to answer your question. 
-Please let me know that you don't have the requested information rather than making up an answer.
+I could not find any relevant information in the knowledge base to answer this question. 
+Please note that I don't have sufficient information to provide a proper answer to your query.
 """
             
             # Add conversation history
@@ -605,69 +627,104 @@ Please let me know that you don't have the requested information rather than mak
         # Streaming response
         async def streaming_response():
             async with aiohttp.ClientSession() as session:
-                # Configure API endpoint and payload based on provider
+                if not model:
+                    yield f"data: {json.dumps({'error': 'No model specified'})}\n\n"
+                    yield f"data: {json.dumps({'done': True})}\n\n"
+                    return
+                    
+                if not model_api_key:
+                    yield f"data: {json.dumps({'error': 'No API key provided for model: ' + str(model)})}\n\n"
+                    yield f"data: {json.dumps({'done': True})}\n\n"
+                    return
+
+                # Initialize api_url, headers, and payload with default values
+                api_url = None  # Will be set based on provider
+                headers = {"Content-Type": "application/json"}
+                payload = {
+                    "model": model,
+                    "messages": messages,
+                    "stream": True,
+                    "temperature": 0.7
+                }
+
+                # Set provider-specific configurations
                 if provider == "openai":
                     api_url = "https://api.openai.com/v1/chat/completions"
-                    payload = {
-                        "model": model,
-                        "messages": messages,
-                        "stream": True,
-                        "temperature": 0.4,  # Slightly higher temperature for more creative markdown formatting
-                        "top_p": 0.92,       # Allow some creativity while staying focused
-                        "presence_penalty": 0.1,  # Slight preference for new content
-                        "frequency_penalty": 0.2,  # Reduce repetition slightly
-                        "response_format": {"type": "text"}  # Ensure we get proper text, not JSON
-                    }
-                    headers = {
-                        "Authorization": f"Bearer {openai_api_key}",
-                        "Content-Type": "application/json"
-                    }
+                    headers["Authorization"] = f"Bearer {model_api_key}"
+                    
+                elif provider == "groq":
+                    api_url = "https://api.groq.com/openai/v1/chat/completions"
+                    headers["Authorization"] = f"Bearer {model_api_key}"
+                    
+                elif provider == "anthropic":
+                    # Anthropic API implementation would go here
+                    logger.error(f"Anthropic streaming is not yet implemented.")
+                    yield f"data: {json.dumps({'error': 'Anthropic streaming not implemented'})}\n\n"
+                    yield f"data: {json.dumps({'done': True})}\n\n"
+                    return
+                    
+                elif provider == "google":
+                    # Google Gemini API implementation would go here
+                    logger.error(f"Google Gemini streaming is not yet implemented.")
+                    yield f"data: {json.dumps({'error': 'Google Gemini streaming not implemented'})}\n\n" 
+                    yield f"data: {json.dumps({'done': True})}\n\n"
+                    return
+                
                 else:
-                    # Default to OpenAI API for all other providers for now
-                    api_url = "https://api.openai.com/v1/chat/completions"
-                    fallback_model = "gpt-4o-mini"  # Use a reliable fallback model
-                    logger.info(f"Using OpenAI fallback model {fallback_model} instead of {provider}")
+                    # Handle unknown provider
+                    error_msg = f"Provider '{provider}' for model '{model}' is not supported."
+                    logger.error(error_msg)
+                    yield f"data: {json.dumps({'error': error_msg})}\n\n"
+                    yield f"data: {json.dumps({'done': True})}\n\n"
+                    return
                     
-                    payload = {
-                        "model": fallback_model,
-                        "messages": messages,
-                        "stream": True,
-                        "temperature": 0.4,  # Slightly higher temperature for more creative markdown formatting
-                        "top_p": 0.92,       # Allow some creativity while staying focused
-                        "presence_penalty": 0.1,  # Slight preference for new content
-                        "frequency_penalty": 0.2,  # Reduce repetition slightly
-                        "response_format": {"type": "text"}  # Ensure we get proper text, not JSON
-                    }
-                    headers = {
-                        "Authorization": f"Bearer {openai_api_key}",
-                        "Content-Type": "application/json"
-                    }
+                # Ensure api_url is set before proceeding
+                if not api_url:
+                    error_msg = f"Failed to determine API URL for provider: {provider}"
+                    logger.error(error_msg)
+                    yield f"data: {json.dumps({'error': error_msg})}\n\n"
+                    yield f"data: {json.dumps({'done': True})}\n\n"
+                    return
                     
+                logger.info(f"Making stream request to {api_url} for model {model}")
+
                 async with session.post(api_url, headers=headers, json=payload) as response:
                     if not response.ok:
-                        error_msg = f"API error: {response.status} - {await response.text()}"
+                        error_content = await response.text()
+                        error_msg = f"Error from {provider} API: {response.status} - {error_content}"
                         logger.error(error_msg)
                         yield f"data: {json.dumps({'error': error_msg})}\n\n"
                         yield f"data: {json.dumps({'done': True})}\n\n"
                         return
                         
-                    async for line in response.content:
-                        if line.startswith(b"data: "):
-                            line = line[6:].strip()
-                            if line == b"[DONE]":
-                                yield f"data: {json.dumps({'done': True})}\n\n"
-                                break
-                            try:
-                                data = json.loads(line)
-                                if "choices" in data and len(data["choices"]) > 0:
-                                    delta = data["choices"][0].get("delta", {})
-                                    content = delta.get("content", "")
-                                    if content:
-                                        yield f"data: {json.dumps({'content': content})}\n\n"
-                            except json.JSONDecodeError:
-                                logger.error(f"Error decoding JSON: {line}")
-                                # Skip this line instead of failing
-                                continue
+                    # Common response parsing for OpenAI-compatible APIs (OpenAI, Groq)
+                    if provider in ["openai", "groq"]:
+                        async for line in response.content:
+                            if line:
+                                line_text = line.decode('utf-8').strip()
+                                if line_text.startswith("data: "):
+                                    if line_text == "data: [DONE]":
+                                        yield f"data: {json.dumps({'done': True})}\n\n"
+                                        break
+                                        
+                                    # Skip empty lines
+                                    if line_text == "data: ":
+                                        continue
+                                    
+                                    data_json = line_text[6:]  # Remove "data: " prefix
+                                    try:
+                                        data = json.loads(data_json)
+                                        if "choices" in data and len(data["choices"]) > 0:
+                                            choice = data["choices"][0]
+                                            if "delta" in choice and "content" in choice["delta"]:
+                                                content = choice["delta"]["content"]
+                                                if content:
+                                                    # Forward the content chunk directly to the client
+                                                    yield f"data: {json.dumps({'content': content})}\n\n"
+                                    except json.JSONDecodeError:
+                                        logger.warning(f"Failed to parse SSE data: {data_json}")
+                                        continue
+
         return StreamingResponse(streaming_response(), media_type="text/event-stream")
     except Exception as e:
         logger.error(f"Error in perform_rag_query_stream: {e}", exc_info=True)
@@ -677,15 +734,16 @@ Please let me know that you don't have the requested information rather than mak
 def perform_rag_query(
     query: str,
     base_collection_name: str,
-    user_collection_name: Optional[str], 
+    user_collection_name: Optional[str],
     qdrant_url: str,
     qdrant_api_key: Optional[str],
-    openai_api_key: Optional[str],
+    openai_api_key: Optional[str], # Key for embeddings
+    model_api_key: Optional[str] = None, # Key for the specific LLM
     history: List[Dict[str, str]] = None,
     memory: List[Dict[str, str]] = None,
-    model: str = "gpt-4o-mini",
+    model: str = None, # Specific API model name
     use_hybrid_search: bool = False,
-    system_prompt: Optional[str] = None  # Add system prompt parameter
+    system_prompt: Optional[str] = None
 ) -> str:
     # Process memory to enhance context
     memory_context = ""
@@ -732,8 +790,12 @@ def perform_rag_query(
             except Exception as e:
                 logger.warning(f"Error retrieving from user collection: {str(e)}")
         
-        # Combine docs, prioritizing user docs
+        # Combine and sort docs by recency, still giving priority to user docs
         all_docs = user_docs + base_docs
+        all_docs.sort(
+            key=lambda doc: doc.metadata.get('upload_timestamp', 0),
+            reverse=True  # Newest first
+        )
         
         # Prepare context from retrieved documents with better formatting
         context = ""
@@ -752,21 +814,17 @@ def perform_rag_query(
         # Format the conversation history with only the original system prompt
         system_message = system_prompt if system_prompt else ""
             
-        # Add context information as part of the user query, not in the system message
+        # Generic context query for non-streaming function
         context_query = f"""
-Here is ALL the relevant information to help answer my question:
+Here is the relevant information to help answer the question:
 
 {context}
 
 My question is: {query}
 
-IMPORTANT: Only use the information provided above to answer the question. If the information provided is insufficient to answer the question completely, explicitly state what specific information is missing. DO NOT make up or hallucinate any information like names, statistics, or details that are not explicitly stated in the provided context.
-
-Please format your response using proper markdown with:
-- Headings (##, ###) for clear section organization
-- Bullet points and numbered lists where appropriate
-- Tables for structured comparisons if needed
-- Bold and italic text for emphasis
+IMPORTANT:
+1. Only use the information provided above to answer the question
+2. Provide a well-structured response using proper markdown formatting
 """
         
         # Format the conversation history
@@ -834,6 +892,20 @@ async def retrieve_documents_parallel(query, base_collection, user_collection=No
                 all_docs.append(doc)
                 
     return all_docs[:top_k]
+
+# Add this helper function to check if a collection exists
+def check_collection_exists(qdrant_url, qdrant_api_key, collection_name):
+    """Check if a collection exists in Qdrant"""
+    try:
+        client = qdrant_client.QdrantClient(
+            url=qdrant_url,
+            api_key=qdrant_api_key,
+            timeout=10.0
+        )
+        client.get_collection(collection_name)
+        return True
+    except Exception:
+        return False
 
 # --- How to Use (Instructions incorporated in comments and example) ---
 

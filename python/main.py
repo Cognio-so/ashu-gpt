@@ -42,24 +42,35 @@ app.mount("/public", StaticFiles(directory="public"), name="public")
 # Add this after the app definition (around line 25)
 gpt_model_cache = {}  # Maps collection_name to model
 
-# Store API keys for different models
+# Store API keys for different models using specified env var names
 MODEL_API_KEYS = {
+    # OpenAI Models
     "gpt-4": os.environ.get("OPENAI_API_KEY"),
+    "gpt-4o": os.environ.get("OPENAI_API_KEY"),
     "gpt-4o-mini": os.environ.get("OPENAI_API_KEY"),
     "gpt-3.5": os.environ.get("OPENAI_API_KEY"),
+    "gpt-3.5-turbo": os.environ.get("OPENAI_API_KEY"),
+    # Anthropic Models
     "claude": os.environ.get("ANTHROPIC_API_KEY"),
-    "gemini": os.environ.get("GOOGLE_API_KEY"),
-    "llama": os.environ.get("META_API_KEY")
+    "claude-3-opus-20240229": os.environ.get("ANTHROPIC_API_KEY"),
+    # Google Models
+    "gemini": os.environ.get("GEMINI_API_KEY"), # Use GEMINI_API_KEY
+    "gemini-pro": os.environ.get("GEMINI_API_KEY"), # Use GEMINI_API_KEY
+    # Groq Models (assuming Llama runs on Groq)
+    "llama": os.environ.get("GROQ_API_KEY"),     # Use GROQ_API_KEY for llama
+    "llama-3-70b-chat": os.environ.get("GROQ_API_KEY"), # Use GROQ_API_KEY
+    # Add other specific model keys if needed, mapping to the correct API key env var
 }
 
-# Add a model translation dictionary near the top of main.py
+# Add a model translation dictionary (ensure keys match frontend options)
 MODEL_TRANSLATIONS = {
-    "gpt-4": "gpt-4o",          # Latest GPT-4 model
-    "gpt-4o-mini": "gpt-4o-mini", # Latest GPT-4 model
-    "gpt-3.5": "gpt-3.5-turbo", # Correct model name for API
-    "claude": "claude-3-opus-20240229",  # Latest Claude model
-    "gemini": "gemini-pro",     # Google's Gemini model
-    "llama": "llama-3-70b-chat" # Meta's Llama model
+    "gpt-4": "gpt-4o",
+    "gpt-4o-mini": "gpt-4o-mini",
+    "gpt-3.5": "gpt-3.5-turbo",
+    "claude": "claude-3-opus-20240229",
+    "gemini": "gemini-pro",
+    "llama": "llama3-70b-8192" # Example: Use the actual Groq model identifier
+    # Add specific translations if needed
 }
 
 # R2 Configuration
@@ -103,13 +114,18 @@ class Message(BaseModel):
     role: str
     content: str
 
+# FIX: Modify ChatRequest to include necessary identifiers
 class ChatRequest(BaseModel):
     message: str
-    collection_name: str
+    # Rename collection_name to gpt_id for clarity, assuming ID is sent
+    gpt_id: str
+    # Add user_email and gpt_name to reconstruct the full collection name
+    user_email: str
+    gpt_name: str
     history: Optional[List[Message]] = []
-    memory: Optional[List[Dict[str, Any]]] = []  # Add memory field
+    memory: Optional[List[Dict[str, Any]]] = []
     user_documents: Optional[List[str]] = []
-    use_hybrid_search: bool = False  # Add hybrid search parameter
+    use_hybrid_search: bool = False
 
 @app.get("/")
 async def root():
@@ -232,7 +248,7 @@ async def index_knowledge(request: IndexRequest):
     
     # Store the full schema if provided
     elif request.schema:
-        model = request.schema.get('model', 'gpt-4o-mini')
+        model = request.schema.get('model')  # Don't set a default
         gpt_model_cache[collection_name] = {
             'model': model,
             'schema': request.schema
@@ -264,80 +280,93 @@ async def chat(request: ChatRequest):
     try:
         # Extract params from request
         message = request.message
-        collection_name = request.collection_name
+        # FIX: Reconstruct the collection_name consistently
+        sanitized_email = ''.join(c if c.isalnum() else '_' for c in request.user_email)
+        sanitized_gpt_name = ''.join(c if c.isalnum() else '_' for c in request.gpt_name)
+        collection_prefix = "kb" if not sanitized_email or not sanitized_email[0].isalpha() else ""
+        # Use gpt_id from the request here
+        collection_name = f"{collection_prefix}_{sanitized_email}_{sanitized_gpt_name}_{request.gpt_id}"
+        collection_name = collection_name[:63] # Ensure length limit
+        
         user_documents = request.user_documents or []
         history = request.history or []
-        memory = request.memory or []  # Add memory extraction
+        memory = request.memory or []
         
-        # Define user documents collection if present
-        user_collection_name = f"{collection_name}_user_docs" if user_documents else None
+        # Define user documents collection if present (using the reconstructed name)
+        user_collection_name = None
+        if user_documents:
+            # Check both possible formats of collection names (with and without prefix)
+            user_collection_with_prefix = f"{collection_name}_user_docs"
+            user_collection_without_prefix = f"{request.gpt_id}_user_docs"
+            
+            # Prefer collection with documents if available
+            try:
+                from KB_indexer import check_collection_exists
+                if check_collection_exists(qdrant_url, qdrant_api_key, user_collection_with_prefix):
+                    user_collection_name = user_collection_with_prefix
+                elif check_collection_exists(qdrant_url, qdrant_api_key, user_collection_without_prefix):
+                    user_collection_name = user_collection_without_prefix
+                else:
+                    # Default to standard format
+                    user_collection_name = user_collection_with_prefix
+            except Exception as e:
+                # Fall back to standard format if check fails
+                print(f"Error checking collections: {e}")
+                user_collection_name = user_collection_with_prefix
         
         # Get the model and system prompt from cache
         cached_data = gpt_model_cache.get(collection_name, {})
-        if isinstance(cached_data, str):
-            # Handle legacy format where only model name was stored
-            frontend_model = cached_data
-            system_prompt = None
-        else:
-            # Handle new format with full schema
-            frontend_model = cached_data.get('model', "gpt-4o-mini")
-            
-            # Extract system prompt from schema if available
-            if 'schema' in cached_data and 'instructions' in cached_data['schema']:
-                system_prompt = cached_data['schema']['instructions']
-            elif 'system_prompt' in cached_data:
-                system_prompt = cached_data['system_prompt']
-            else:
-                system_prompt = None
-        
-        # Append markdown enhancement to user-provided system prompt
-        if system_prompt:
-            if not "markdown" in system_prompt.lower():
-                system_prompt += "\n\nAlways format your responses in proper markdown with appropriate headings, bullet points, tables, and emojis where relevant."
-        
-        # Enhance the system prompt with stronger guardrails against hallucination
-        if system_prompt:
-            # Add anti-hallucination guardrails if not already present
-            if not "hallucinate" in system_prompt.lower():
-                system_prompt = f"""
-{system_prompt}
+        frontend_model = None # Initialize
+        system_prompt = None
+        if isinstance(cached_data, dict):
+            frontend_model = cached_data.get('model')
+            system_prompt = cached_data.get('system_prompt')
+        elif isinstance(cached_data, str): # Handle legacy cache format
+             frontend_model = cached_data
 
-IMPORTANT GUIDELINES:
-1. NEVER make up information that isn't in the provided context
-2. If you don't have enough information to answer, clearly state what specific information is missing
-3. Only reference documents and information that actually exist in the provided context
-4. Format your response with proper markdown for readability
-"""
-        
+        if not frontend_model:
+            error_msg = f"No model configured or found in cache for collection: {collection_name}"
+            print(f"⚠️ {error_msg}")
+            return {"success": False, "response": error_msg}
+            
         # Translate frontend model name to actual API model name
+        # Use frontend_model as default if no translation exists
         model = MODEL_TRANSLATIONS.get(frontend_model, frontend_model)
         
-        print(f"🤖 Using model {frontend_model} (API: {model}) for chat with collection {collection_name}")
+        print(f"🤖 Using model {frontend_model} (API Target: {model}) for chat with collection {collection_name}")
         if system_prompt:
             print(f"📝 Using custom system prompt: {system_prompt[:50]}...")
         
         # Get configuration from environment
         qdrant_url = os.environ.get("QDRANT_URL")
         qdrant_api_key = os.environ.get("QDRANT_API_KEY")
-        openai_api_key = os.environ.get("OPENAI_API_KEY")
+        # Key for embeddings - assumed to be OpenAI for now
+        openai_embedding_key = os.environ.get("OPENAI_API_KEY") 
+
+        # Get the appropriate API key for the *selected model*
+        # Use the frontend_model name to look up the key in the updated MODEL_API_KEYS
+        model_api_key = MODEL_API_KEYS.get(frontend_model)
         
-        # Get the appropriate API key based on model
-        if frontend_model.startswith("gpt-"):
-            openai_api_key = MODEL_API_KEYS.get("gpt-4", os.environ.get("OPENAI_API_KEY"))
-        elif frontend_model == "claude":
-            openai_api_key = MODEL_API_KEYS.get("claude", os.environ.get("ANTHROPIC_API_KEY"))
-        elif frontend_model == "gemini":
-            openai_api_key = MODEL_API_KEYS.get("gemini", os.environ.get("GOOGLE_API_KEY"))
-        elif frontend_model == "llama":
-            openai_api_key = MODEL_API_KEYS.get("llama", os.environ.get("META_API_KEY"))
-        else:
-            openai_api_key = os.environ.get("OPENAI_API_KEY")
+        # Check if we have the specific API key for the selected model
+        if not model_api_key:
+            # Try matching based on prefix (e.g., gpt-4o maps to gpt-4 key)
+            if frontend_model.startswith("gpt-"):
+                model_api_key = MODEL_API_KEYS.get("gpt-4") # Or specific version if needed
+            # Add similar logic for other prefixes if necessary
             
-        # Check if we have the API key
-        if not openai_api_key:
-            print(f"⚠️ No API key found for model: {frontend_model}")
-            return {"success": False, "response": f"No API key configured for model: {frontend_model}"}
-        
+            # If still not found, log an error
+            if not model_api_key:
+                error_msg = f"No API key configured in environment for model: {frontend_model}"
+                print(f"⚠️ {error_msg}")
+                print(f"   Checked MODEL_API_KEYS with key: '{frontend_model}'")
+                return {"success": False, "response": error_msg}
+
+        # Check if we have the OpenAI key needed for embeddings
+        if not openai_embedding_key:
+             error_msg = "OpenAI API key for embeddings is missing in environment (OPENAI_API_KEY)."
+             print(f"⚠️ {error_msg}")
+             return {"success": False, "response": error_msg}
+
         # Format history for KB_indexer
         formatted_history = [
             {"role": msg.role, "content": msg.content} for msg in history
@@ -349,22 +378,20 @@ IMPORTANT GUIDELINES:
         # Use the KB_indexer module to perform the RAG query
         from KB_indexer import perform_rag_query
         
-        # Get the model from cache or use a default
-        model = gpt_model_cache.get(collection_name, "gpt-4o-mini")
-        print(f"Using model {model} for chat with collection {collection_name}")
-        
+        # Pass the correct API key and model name
         response = perform_rag_query(
             query=message,
             base_collection_name=collection_name,
             user_collection_name=user_collection_name,
             qdrant_url=qdrant_url,
             qdrant_api_key=qdrant_api_key,
-            openai_api_key=openai_api_key,
+            openai_api_key=openai_embedding_key, # Key for embeddings
+            model_api_key=model_api_key,      # Key for the specific LLM
             history=formatted_history,
-            memory=formatted_memory,  # Pass memory to RAG
-            model=model,  # Use the stored model
-            use_hybrid_search=request.use_hybrid_search,  # Pass hybrid search parameter
-            system_prompt=system_prompt  # Pass the system prompt
+            memory=formatted_memory,
+            model=model,                      # Translated API model name
+            use_hybrid_search=request.use_hybrid_search,
+            system_prompt=system_prompt
         )
         
         return {"success": True, "response": response}
@@ -417,55 +444,77 @@ async def chat_stream(request: ChatRequest):
         
         # Extract params from request
         message = request.message
-        collection_name = request.collection_name
+        # FIX: Reconstruct the collection_name consistently
+        sanitized_email = ''.join(c if c.isalnum() else '_' for c in request.user_email)
+        sanitized_gpt_name = ''.join(c if c.isalnum() else '_' for c in request.gpt_name)
+        collection_prefix = "kb" if not sanitized_email or not sanitized_email[0].isalpha() else ""
+        # Use gpt_id from the request here
+        collection_name = f"{collection_prefix}_{sanitized_email}_{sanitized_gpt_name}_{request.gpt_id}"
+        collection_name = collection_name[:63] # Ensure length limit
+        
         user_documents = request.user_documents or []
         history = request.history or []
         memory = request.memory or []
         
+        # Get configuration from environment FIRST (fix scope issue)
+        qdrant_url = os.environ.get("QDRANT_URL")
+        if not qdrant_url:
+            print(f"No QDRANT_URL found in environment")
+            async def error_response():
+                yield f'data: {{"error": "No QDRANT_URL configured"}}\n\n'
+                yield f'data: {{"done": true}}\n\n'
+            return StreamingResponse(error_response(), media_type="text/event-stream")
+            
+        qdrant_api_key = os.environ.get("QDRANT_API_KEY")
+        
         # Define user documents collection if present
-        user_collection_name = f"{collection_name}_user_docs" if user_documents else None
+        user_collection_name = None
+        if user_documents:
+            # First try the exact ID format that was actually indexed
+            direct_user_collection = f"{request.gpt_id}_user_docs"
+            
+            # Import this only if needed to check collections
+            from KB_indexer import check_collection_exists
+            
+            try:
+                # Try direct ID format first (this matches what we saw in logs)
+                if check_collection_exists(qdrant_url, qdrant_api_key, direct_user_collection):
+                    user_collection_name = direct_user_collection
+                    print(f"✅ Found user collection: {user_collection_name}")
+                # Fallback to collection name format
+                elif check_collection_exists(qdrant_url, qdrant_api_key, f"{collection_name}_user_docs"):
+                    user_collection_name = f"{collection_name}_user_docs"
+                    print(f"✅ Found user collection: {user_collection_name}")
+                else:
+                    print(f"⚠️ No user collection found, using default: {direct_user_collection}")
+                    user_collection_name = direct_user_collection
+            except Exception as e:
+                print(f"Error checking collections: {e}")
+                user_collection_name = direct_user_collection
         
         # Get the model and system prompt from cache
         cached_data = gpt_model_cache.get(collection_name, {})
-        if isinstance(cached_data, str):
-            # Handle legacy format where only model name was stored
-            frontend_model = cached_data
-            system_prompt = None
-        else:
-            # Handle new format with full schema
-            frontend_model = cached_data.get('model', "gpt-4o-mini")
-            
-            # Extract system prompt from schema if available
-            if 'schema' in cached_data and 'instructions' in cached_data['schema']:
-                system_prompt = cached_data['schema']['instructions']
-            elif 'system_prompt' in cached_data:
-                system_prompt = cached_data['system_prompt']
-            else:
-                system_prompt = None
-        
-        # Append markdown enhancement to user-provided system prompt
-        if system_prompt:
-            if not "markdown" in system_prompt.lower():
-                system_prompt += "\n\nAlways format your responses in proper markdown with appropriate headings, bullet points, tables, and emojis where relevant."
-        
-        # Enhance the system prompt with stronger guardrails against hallucination
-        if system_prompt:
-            # Add anti-hallucination guardrails if not already present
-            if not "hallucinate" in system_prompt.lower():
-                system_prompt = f"""
-{system_prompt}
+        frontend_model = None # Initialize
+        system_prompt = None
+        if isinstance(cached_data, dict):
+            frontend_model = cached_data.get('model')
+            system_prompt = cached_data.get('system_prompt')
+        elif isinstance(cached_data, str): # Handle legacy cache format
+             frontend_model = cached_data
 
-IMPORTANT GUIDELINES:
-1. NEVER make up information that isn't in the provided context
-2. If you don't have enough information to answer, clearly state what specific information is missing
-3. Only reference documents and information that actually exist in the provided context
-4. Format your response with proper markdown for readability
-"""
-        
+        if not frontend_model:
+            error_msg = f"No model configured or found in cache for collection: {collection_name}"
+            print(f"⚠️ {error_msg}")
+            async def error_stream():
+                 yield f'data: {{"error": "{error_msg}"}}\n\n'
+                 yield f'data: {{"done": true}}\n\n'
+            return StreamingResponse(error_stream(), media_type="text/event-stream")
+            
         # Translate frontend model name to actual API model name
+        # Use frontend_model as default if no translation exists
         model = MODEL_TRANSLATIONS.get(frontend_model, frontend_model)
         
-        print(f"Using model {frontend_model} (API: {model}) for streaming chat with collection {collection_name}")
+        print(f"Using model {frontend_model} (API Target: {model}) for streaming chat with collection {collection_name}")
         if system_prompt:
             print(f"Using custom system prompt: {system_prompt[:50]}...")
         
@@ -480,36 +529,36 @@ IMPORTANT GUIDELINES:
             
         qdrant_api_key = os.environ.get("QDRANT_API_KEY")
         
-        # Get the appropriate API key based on model provider
-        openai_api_key = os.environ.get("OPENAI_API_KEY")  # Always needed for embeddings
+        # Key for embeddings - assumed to be OpenAI for now
+        openai_embedding_key = os.environ.get("OPENAI_API_KEY") 
         
-        # Get model-specific API key
-        if model.startswith("gpt-"):
-            model_api_key = MODEL_API_KEYS.get("gpt-4", os.environ.get("OPENAI_API_KEY"))
-        elif model == "claude":
-            model_api_key = MODEL_API_KEYS.get("claude", os.environ.get("ANTHROPIC_API_KEY"))
-        elif model == "gemini":
-            model_api_key = MODEL_API_KEYS.get("gemini", os.environ.get("GOOGLE_API_KEY"))
-        elif model == "llama":
-            model_api_key = MODEL_API_KEYS.get("llama", os.environ.get("META_API_KEY"))
-        else:
-            model_api_key = os.environ.get("OPENAI_API_KEY")
+        # Get the appropriate API key for the *selected model*
+        model_api_key = MODEL_API_KEYS.get(frontend_model)
         
-        # Check if we have the OpenAI API key for embeddings
-        if not openai_api_key:
-            print(f"No OpenAI API key found for embeddings")
-            async def error_response():
-                yield f'data: {{"error": "No OpenAI API key configured for embeddings"}}\n\n'
-                yield f'data: {{"done": true}}\n\n'
-            return StreamingResponse(error_response(), media_type="text/event-stream")
-        
-        # Check if we have the model-specific API key
+        # Check if we have the specific API key for the selected model
         if not model_api_key:
-            print(f"No API key found for model: {model}")
-            async def error_response():
-                yield f'data: {{"error": "No API key configured for model: {model}"}}\n\n'
-                yield f'data: {{"done": true}}\n\n'
-            return StreamingResponse(error_response(), media_type="text/event-stream")
+            # Try matching based on prefix (e.g., gpt-4o maps to gpt-4 key)
+            if frontend_model.startswith("gpt-"):
+                model_api_key = MODEL_API_KEYS.get("gpt-4") # Or specific version if needed
+            # Add similar logic for other prefixes if necessary
+
+            if not model_api_key:
+                error_msg = f"No API key configured in environment for model: {frontend_model}"
+                print(f"⚠️ {error_msg}")
+                print(f"   Checked MODEL_API_KEYS with key: '{frontend_model}'")
+                async def error_stream_key():
+                    yield f'data: {{"error": "{error_msg}"}}\n\n'
+                    yield f'data: {{"done": true}}\n\n'
+                return StreamingResponse(error_stream_key(), media_type="text/event-stream")
+
+        # Check if we have the OpenAI key needed for embeddings
+        if not openai_embedding_key:
+             error_msg = "OpenAI API key for embeddings is missing in environment (OPENAI_API_KEY)."
+             print(f"⚠️ {error_msg}")
+             async def error_stream_emb():
+                 yield f'data: {{"error": "{error_msg}"}}\n\n'
+                 yield f'data: {{"done": true}}\n\n'
+             return StreamingResponse(error_stream_emb(), media_type="text/event-stream")
         
         # Format history
         formatted_history = [
@@ -531,14 +580,14 @@ IMPORTANT GUIDELINES:
             user_collection_name=user_collection_name,
             qdrant_url=qdrant_url,
             qdrant_api_key=qdrant_api_key,
-            openai_api_key=openai_api_key,  # For embeddings
-            model_api_key=model_api_key,    # For completions with specific model
+            openai_api_key=openai_embedding_key, # Key for embeddings
+            model_api_key=model_api_key,         # Key for the specific LLM
             history=formatted_history,
-            memory=formatted_memory,        # Pass memory to streaming RAG
-            model=model,  # Use the selected model
-            top_k=3,  # Retrieve enough docs for quality responses
-            use_hybrid_search=request.use_hybrid_search,  # Pass hybrid search parameter
-            system_prompt=system_prompt  # Pass the system prompt
+            memory=formatted_memory,
+            model=model,                         # Translated API model name
+            top_k=3,
+            use_hybrid_search=request.use_hybrid_search,
+            system_prompt=system_prompt
         )
     
     except Exception as e:
@@ -546,15 +595,18 @@ IMPORTANT GUIDELINES:
         print(f"Error processing streaming chat: {e}")
         print(traceback.format_exc())
         
-        async def error_response():
-            import traceback
-            trace = traceback.format_exc()
+        # FIX: Re-apply fix for error response generator
+        error_message = str(e).replace('"', '\\"').replace('\n', '\\n') # Basic escaping
+        # Define the generator to accept the error message
+        async def error_response_gen(err_msg: str): 
+            trace = traceback.format_exc().replace('"', '\\"').replace('\n', '\\n')
             print(f"Detailed error traceback: {trace}")
-            yield f'data: {{"content": "Error processing your request: {str(e)}"}}\n\n'
-            yield f'data: {{"error": "Error in streaming: {str(e)}"}}\n\n'
+            yield f'data: {{"content": "Error processing your request: {err_msg}"}}\n\n'
+            yield f'data: {{"error": "Error in streaming: {err_msg}"}}\n\n'
             yield f'data: {{"done": true}}\n\n'
         
-        return StreamingResponse(error_response(), media_type="text/event-stream")
+        # Call the generator with the captured error message
+        return StreamingResponse(error_response_gen(error_message), media_type="text/event-stream")
 
 @app.post("/upload-chat-files")
 async def upload_chat_files(

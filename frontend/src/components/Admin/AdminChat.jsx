@@ -328,16 +328,22 @@ const AdminChat = () => {
             setHasInteracted(true);
             
             // Create request payload with enhanced memory
-            const chatCollectionName = collectionName || gptData?._id || "default_collection";
+            // FIX: No longer need chatCollectionName here for the main payload
+            // const chatCollectionName = collectionName || gptData?._id || "default_collection"; 
             
             // Get hybridSearch setting from capabilities
             const useHybridSearch = gptData?.capabilities?.hybridSearch || false;
             
             const payload = {
                 message,
-                collection_name: chatCollectionName,
+                // FIX: Send gptId instead of constructed collectionName
+                gpt_id: gptId, 
+                // FIX: Add user_email (using admin user's email)
+                user_email: user?.email || 'unknown_admin', 
+                // FIX: Add gpt_name
+                gpt_name: gptData?.name || 'unknown_gpt', 
                 user_documents: userDocuments,
-                model: gptData?.model,
+                // model: gptData?.model, // Model is determined backend-side based on collection/gpt_id now
                 memory: updatedMemory,
                 history: messages.slice(-6).map(msg => ({
                     role: msg.role,
@@ -346,14 +352,21 @@ const AdminChat = () => {
                 // Use the actual hybridSearch setting
                 use_hybrid_search: useHybridSearch
             };
+
+            // Add check for gptId before making the call
+            if (!payload.gpt_id) {
+                throw new Error("GPT ID is missing, cannot send message.");
+            }
             
             // Try streaming first
             try {
-                console.log("Attempting streaming response...");
+                console.log("Attempting streaming response with payload:", payload); // Log the payload
                 const response = await fetch(`${PYTHON_URL}/chat-stream`, {
                     method: "POST",
                     headers: {
                         'Content-Type': 'application/json',
+                         // Add credentials if your backend CORS requires it for fetch
+                        // credentials: 'include' 
                     },
                     body: JSON.stringify(payload)
                 });
@@ -363,19 +376,27 @@ const AdminChat = () => {
                     await handleStreamingResponse(response);
                 } else {
                     console.error("Stream response not OK:", response.status, response.statusText);
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    const errorText = await response.text(); // Try to get error text
+                    console.error("Stream error response body:", errorText);
+                    throw new Error(`HTTP error! status: ${response.status} - ${errorText || response.statusText}`);
                 }
             } catch (streamingError) {
                 console.warn("Streaming failed, falling back to regular chat API:", streamingError);
                 
                 // Fallback to regular chat API
+                 // Remove model from payload as it's handled backend-side
+                // delete payload.model; 
+                console.log("Attempting fallback response with payload:", payload); // Log the fallback payload
+
                 const fallbackResponse = await axios.post(
                     `${PYTHON_URL}/chat`, 
                     payload,
                     {
                         headers: {
                             'Content-Type': 'application/json',
-                        }
+                            // credentials: 'include' // If using axios withCredentials in instance, maybe not needed here
+                        },
+                        // withCredentials: true // If using axios directly and need cookies
                     }
                 );
                 
@@ -390,21 +411,36 @@ const AdminChat = () => {
                     };
                     
                     setMessages(prev => [...prev, aiResponse]);
+                     // Save fallback response to history
+                    await saveMessageToHistory(aiResponse.content, 'assistant');
+
+                } else {
+                     // Handle fallback failure
+                    const errorContent = fallbackResponse.data?.response || "Failed to get response from fallback API.";
+                    const errorResponse = {
+                        id: Date.now() + 1,
+                        role: 'assistant',
+                        content: errorContent,
+                        timestamp: new Date()
+                    };
+                    setMessages(prev => [...prev, errorResponse]);
+                    await saveMessageToHistory(errorContent, 'assistant'); // Save error
                 }
             }
         } catch (err) {
             console.error("Error in handleChatSubmit:", err);
             // Set error in message list
+            const errorContent = `I'm sorry, I couldn't process your request: ${err.message}`;
             const errorResponse = {
                 id: Date.now() + 1,
                 role: 'assistant',
-                content: "I'm sorry, I couldn't process your request at this time.",
+                content: errorContent,
                 timestamp: new Date()
             };
             setMessages(prev => [...prev, errorResponse]);
             
             // Save error message to history
-            await saveMessageToHistory(errorResponse.content, 'assistant');
+            await saveMessageToHistory(errorContent, 'assistant');
             
             setStreamingMessage(null); // Clear any partial streaming message
         } finally {

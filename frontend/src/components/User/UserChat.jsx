@@ -254,120 +254,80 @@ const UserChat = () => {
             timestamp: new Date()
         };
         
-        // Save user message to history first
-        try {
-            await saveMessageToHistory(message, 'user');
-            console.log('User message saved to history:', message.substring(0, 50) + '...');
-        } catch (error) {
-            console.error('Error saving user message:', error);
-        }
-        
         setMessages(prev => [...prev, userMessage]);
+        
+        // Save user message immediately
+        saveMessageToHistory(message, 'user');
+        
+        // Keep only the last 10 messages for context
+        const recentHistory = [...conversationMemory, { role: 'user', content: message }]
+            .slice(-10) // Take the last 10
+            .map(msg => ({ role: msg.role, content: msg.content })); // Format for backend
+
+        setConversationMemory(prev => [...prev, { role: 'user', content: message, timestamp: new Date() }].slice(-10));
+
+        const assistantMessage = {
+            id: Date.now() + 1,
+            role: 'assistant',
+            content: '',
+            isLoading: true,
+            timestamp: new Date()
+        };
+        setMessages(prev => [...prev, assistantMessage]);
         setLoading(prev => ({ ...prev, message: true }));
 
+        // Backend API Call
         try {
-            // Update conversation memory with relevant context
-            const updatedMemory = [...conversationMemory];
-            if (updatedMemory.length >= 10) {
-                // Keep only the most recent messages if memory gets too large
-                updatedMemory.splice(0, updatedMemory.length - 9);
-            }
-            updatedMemory.push({
-                role: 'user',
-                content: message,
-                timestamp: new Date().toISOString()
-            });
-            setConversationMemory(updatedMemory);
-            
-            // Get hybridSearch setting from capabilities
-            const useHybridSearch = gptData?.capabilities?.hybridSearch || false;
-            
-            // Use the userDocuments in your API call
-            const backendUrl = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:8000';
-            
             const payload = {
-                message,
-                collection_name: collectionName,
+                message: message,
+                // FIX: Send gptId instead of constructed collectionName
+                gpt_id: gptId, 
+                // FIX: Add user_email
+                user_email: user?.email || 'unknown_user', 
+                // FIX: Add gpt_name
+                gpt_name: gptData?.name || 'unknown_gpt', 
+                history: recentHistory, // Send formatted recent history
+                memory: conversationMemory, // Send current memory state
                 user_documents: userDocuments,
-                model: gptData?.model,
-                memory: updatedMemory,
-                history: messages.slice(-6).map(msg => ({
-                    role: msg.role,
-                    content: msg.content
-                })),
-                use_hybrid_search: useHybridSearch
+                use_hybrid_search: gptData?.use_hybrid_search || false // Default to false if not set
             };
-
-            // Try streaming first
-            try {
-                const response = await fetch(`${backendUrl}/chat-stream`, {
-                    method: "POST",
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(payload)
-                });
-                
-                if (response.ok) {
-                    await handleStreamingResponse(response, saveMessageToHistory);
-                } else {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-            } catch (streamingError) {
-                console.warn("Streaming failed, falling back to regular chat API:", streamingError);
-                
-                // Fallback to regular chat
-                const fallbackResponse = await axios.post(
-                    `${backendUrl}/chat`, 
-                    payload,
-                    {
-                        headers: {
-                            'Content-Type': 'application/json',
-                        }
-                    }
-                );
-                
-                if (fallbackResponse.data && fallbackResponse.data.success && fallbackResponse.data.response) {
-                    const assistantMessage = {
-                        id: Date.now() + 1,
-                        role: 'assistant',
-                        content: fallbackResponse.data.response,
-                        timestamp: new Date()
-                    };
-                    
-                    setMessages(prev => [...prev, assistantMessage]);
-                    
-                    // Save assistant message to history
-                    try {
-                        await saveMessageToHistory(assistantMessage.content, 'assistant');
-                        console.log('Assistant message saved to history (fallback):', assistantMessage.content.substring(0, 50) + '...');
-                    } catch (error) {
-                        console.error('Error saving assistant message (fallback):', error);
-                    }
-                } else {
-                    throw new Error("Invalid response from server");
-                }
-            }
-        } catch (err) {
-            console.error("Error submitting chat message:", err);
-            const errorMessage = {
-                id: Date.now() + 1,
-                role: 'assistant',
-                content: "Sorry, I encountered an error trying to respond. The knowledge base for this GPT might not be properly indexed.",
-                timestamp: new Date(),
-                isError: true
-            };
-            setMessages(prev => [...prev, errorMessage]);
             
-            // Save error message to history
-            try {
-                await saveMessageToHistory(errorMessage.content, 'assistant');
-                console.log('Error message saved to history');
-            } catch (error) {
-                console.error('Error saving error message:', error);
+            console.log("Sending to /chat-stream:", payload);
+
+            const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/chat-stream`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'text/event-stream',
+                    // Add authorization if needed, handled by axiosInstance interceptor if using it
+                    // 'Authorization': `Bearer ${getAccessToken()}` 
+                },
+                body: JSON.stringify(payload),
+                // If using fetch directly, ensure credentials are sent if required by CORS
+                credentials: 'include' 
+            });
+
+            if (!response.ok) {
+                throw new Error(`API error: ${response.status} ${response.statusText}`);
             }
-        } finally {
+            
+            if (response.body) {
+                await handleStreamingResponse(response, saveMessageToHistory);
+            } else {
+                throw new Error("Response body is null");
+            }
+
+        } catch (error) {
+            console.error("Error calling chat stream API:", error);
+            setMessages(prev => prev.map(msg => 
+                msg.id === assistantMessage.id 
+                ? { ...msg, content: `Error: ${error.message}`, isLoading: false } 
+                : msg
+            ));
             setLoading(prev => ({ ...prev, message: false }));
+            
+            // Optionally save error to history
+            saveMessageToHistory(`Error processing request: ${error.message}`, 'assistant');
         }
     };
 
