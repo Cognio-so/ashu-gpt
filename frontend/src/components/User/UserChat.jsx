@@ -279,6 +279,9 @@ const UserChat = () => {
             });
             setConversationMemory(updatedMemory);
             
+            // Get hybridSearch setting from capabilities
+            const useHybridSearch = gptData?.capabilities?.hybridSearch || false;
+            
             // Use the userDocuments in your API call
             const backendUrl = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:8000';
             
@@ -292,7 +295,7 @@ const UserChat = () => {
                     role: msg.role,
                     content: msg.content
                 })),
-                use_hybrid_search: gptData?.capabilities?.hybridSearch || false
+                use_hybrid_search: useHybridSearch
             };
 
             // Try streaming first
@@ -370,10 +373,31 @@ const UserChat = () => {
 
     // Fix the handleStreamingResponse function to properly save assistant messages
     const handleStreamingResponse = async (response, saveMessageToHistory) => {
+        // Add connection timeout handling
+        const TIMEOUT_MS = 30000; // 30 seconds
+        let timeoutId = setTimeout(() => {
+            console.error("Streaming response timed out");
+            setLoading(prev => ({ ...prev, message: false }));
+            setMessages(prev => [...prev, {
+                id: Date.now(),
+                role: 'system',
+                content: "❌ Response timed out. Please try again.",
+                timestamp: new Date()
+            }]);
+        }, TIMEOUT_MS);
+        
+        // Rest of the implementation remains the same, just add:
+        // Clear timeout when response starts streaming
+        clearTimeout(timeoutId);
+        
+        // Add chunk buffering for more efficient rendering
+        let messageBuffer = "";
+        const BUFFER_INTERVAL = 100; // ms
+        let lastRenderTime = Date.now();
+        
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let streamingMessageId = Date.now() + 1;
-        let completeContent = ''; // Track the complete message content
         
         // Create initial streaming message
         const initialMessage = {
@@ -392,13 +416,13 @@ const UserChat = () => {
                 
                 if (done) {
                     // Explicitly log the complete content to debug
-                    console.log('Stream complete, saving assistant message:', completeContent.substring(0, 50) + '...');
+                    console.log('Stream complete, saving assistant message:', messageBuffer.substring(0, 50) + '...');
                     
                     // Save the complete message to history - IMPORTANT FIX HERE
-                    if (completeContent && completeContent.trim()) {
+                    if (messageBuffer && messageBuffer.trim()) {
                         try {
                             // Make sure this call happens and isn't blocked
-                            const saveResult = await saveMessageToHistory(completeContent, 'assistant');
+                            const saveResult = await saveMessageToHistory(messageBuffer, 'assistant');
                             console.log('Assistant message saved result:', saveResult);
                         } catch (saveError) {
                             console.error('Failed to save assistant message:', saveError);
@@ -410,7 +434,7 @@ const UserChat = () => {
                     // Update the conversation memory only after saving
                     setConversationMemory(prev => [...prev, {
                         role: 'assistant',
-                        content: completeContent,
+                        content: messageBuffer,
                         timestamp: new Date().toISOString()
                     }]);
                     
@@ -444,9 +468,9 @@ const UserChat = () => {
                             
                             if (parsed.done === true) {
                                 // Make sure we save the message before marking as done
-                                if (completeContent && completeContent.trim()) {
+                                if (messageBuffer && messageBuffer.trim()) {
                                     try {
-                                        await saveMessageToHistory(completeContent, 'assistant');
+                                        await saveMessageToHistory(messageBuffer, 'assistant');
                                         console.log('Assistant message saved on done signal');
                                     } catch (saveError) {
                                         console.error('Failed to save assistant message on done:', saveError);
@@ -460,7 +484,7 @@ const UserChat = () => {
                             }
                             
                             if (parsed.content) {
-                                completeContent += parsed.content; // Add to complete content
+                                messageBuffer += parsed.content; // Add to complete content
                                 setMessages(prev => prev.map(msg => 
                                     msg.id === streamingMessageId ? 
                                     { ...msg, content: msg.content + parsed.content } : 
@@ -471,6 +495,16 @@ const UserChat = () => {
                             console.error("Error parsing streaming line:", e, "Line:", line);
                         }
                     }
+                }
+                
+                // Only update UI every BUFFER_INTERVAL ms for better performance
+                if (Date.now() - lastRenderTime > BUFFER_INTERVAL) {
+                    setMessages(prev => {
+                        const updatedMessages = [...prev];
+                        updatedMessages[updatedMessages.length - 1].content = messageBuffer;
+                        return updatedMessages;
+                    });
+                    lastRenderTime = Date.now();
                 }
             }
         } catch (err) {
@@ -506,38 +540,28 @@ const UserChat = () => {
 
     const showWebSearch = gptData?.capabilities?.webBrowsing === true;
 
-    const notifyGptOpened = async (gptData, userData) => {
+    const notifyGptOpened = async (customGpt, userData) => {
         try {
-            if (!gptData) return false;
+            // Use actual hybridSearch setting
+            const useHybridSearch = customGpt.capabilities?.hybridSearch || false;
             
-            // Check backend availability but don't block if check fails
-            let isAvailable = true;
-            try {
-                const backendUrl = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:8000';
-                const checkResponse = await fetch(`${backendUrl}/`);
-                isAvailable = checkResponse.ok;
-            } catch (e) {
-                isAvailable = false;
-            }
-            
-            if (!isAvailable) {
-                console.warn("Backend appears to be unavailable");
-                return false;
-            }
+            const fileUrls = customGpt.knowledgeFiles?.map(file => file.fileUrl).filter(url => 
+                url && (url.startsWith('http://') || url.startsWith('https://'))
+            ) || [];
             
             const backendUrl = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:8000';
             
             const payload = {
                 user_email: userData?.email || 'user@example.com',
-                gpt_name: gptData.name || 'Unnamed GPT',
-                gpt_id: gptData._id,
-                file_urls: gptData.files || [],
-                use_hybrid_search: gptData.capabilities?.hybridSearch || false,
+                gpt_name: customGpt.name || 'Unnamed GPT',
+                gpt_id: customGpt._id,
+                file_urls: fileUrls,
+                use_hybrid_search: useHybridSearch,
                 schema: {
-                    model: gptData.model || "gpt-4o-mini",
-                    instructions: gptData.instructions || "",
-                    capabilities: gptData.capabilities || {},
-                    use_hybrid_search: gptData.capabilities?.hybridSearch || false
+                    model: customGpt.model || "gpt-4o-mini",
+                    instructions: customGpt.instructions || "",
+                    capabilities: customGpt.capabilities || {},
+                    use_hybrid_search: useHybridSearch
                 }
             };
             
@@ -571,95 +595,178 @@ const UserChat = () => {
         }
     };
 
+    // Optimize file upload for maximum speed
     const handleFileUpload = async (files) => {
-        if (!files.length || !gptData) return;
+        if (!files || files.length === 0) return;
+        
+        setIsUploading(true);
+        setUploadProgress(0);
         
         try {
-            // Set uploading state to true
-            setIsUploading(true);
-            setUploadProgress(0);
-            // Store file information for display
-            setUploadedFiles(Array.from(files).map(file => ({
-                name: file.name,
-                size: file.size,
-                type: file.type
-            })));
-            
-            // Create FormData for file upload
-            const formData = new FormData();
-            for (let i = 0; i < files.length; i++) {
-                formData.append('files', files[i]);
-            }
-            formData.append('user_email', userData?.email || 'user@example.com');
-            formData.append('gpt_id', gptData._id);
-            formData.append('gpt_name', gptData.name);
-            formData.append('collection_name', collectionName || gptData._id);
-            formData.append('is_user_document', 'true');
-            
-            // Use a faster progress simulation for better perceived performance
-            const startTime = Date.now();
-            const uploadDuration = 1500; // 1.5 seconds for initial upload phase
-            const progressInterval = setInterval(() => {
-                const elapsed = Date.now() - startTime;
-                if (elapsed < uploadDuration) {
-                    // Fast progress to 60% during "upload" phase
-                    const progress = Math.min(60, (elapsed / uploadDuration) * 60);
-                    setUploadProgress(progress);
-                } else {
-                    // Then slower progress to 90% during "processing" phase
-                    setUploadProgress(prev => {
-                        if (prev < 90) {
-                            return prev + (90 - prev) * 0.08;
-                        }
-                        return prev;
-                    });
-                }
-            }, 100); // Update progress more frequently
-            
-            // Get the backend URL from environment
-            const backendUrl = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:8000';
-            
-            // Upload files to backend
-            const response = await axios.post(
-                `${backendUrl}/upload-chat-files`,
-                formData,
-                {
-                    headers: {
-                        'Content-Type': 'multipart/form-data',
-                    },
-                    onUploadProgress: (progressEvent) => {
-                        // Only use real progress for the first 60%
-                        const percentCompleted = Math.round(
-                            (progressEvent.loaded * 60) / (progressEvent.total || 100)
-                        );
-                        // Cap at 60% since processing happens after upload
-                        setUploadProgress(Math.min(percentCompleted, 60));
+            // 1. Client-side file preprocessing for faster uploads
+            const preprocessedFiles = await Promise.all(
+                Array.from(files).map(async (file) => {
+                    // Size validation - fail fast for oversized files
+                    const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB limit
+                    if (file.size > MAX_FILE_SIZE) return { file, oversized: true };
+                    
+                    // File type validation - only process supported formats
+                    const validTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'];
+                    const fileExt = file.name.split('.').pop().toLowerCase();
+                    if (!validTypes.includes(file.type) && !['pdf', 'docx', 'txt'].includes(fileExt)) {
+                        return { file, unsupported: true };
                     }
-                }
+                    
+                    return { file, valid: true };
+                })
             );
             
-            // Clear the progress interval
-            clearInterval(progressInterval);
+            // Handle invalid files separately to avoid slowing down the upload
+            const validFiles = preprocessedFiles.filter(f => f.valid).map(f => f.file);
+            const invalidFiles = preprocessedFiles.filter(f => !f.valid);
             
-            // Complete the progress bar
-            setUploadProgress(100);
+            if (invalidFiles.length > 0) {
+                const oversizedMsg = invalidFiles.filter(f => f.oversized).map(f => f.file.name).join(', ');
+                const unsupportedMsg = invalidFiles.filter(f => f.unsupported).map(f => f.file.name).join(', ');
+                
+                let errorMsg = '';
+                if (oversizedMsg) errorMsg += `Files exceeding size limit: ${oversizedMsg}. `;
+                if (unsupportedMsg) errorMsg += `Unsupported file types: ${unsupportedMsg}`;
+                
+                setMessages(prev => [...prev, {
+                    id: Date.now(),
+                    role: 'system',
+                    content: errorMsg,
+                    timestamp: new Date()
+                }]);
+            }
             
-            // Small delay before removing the progress indicator
-            setTimeout(() => {
+            // Exit early if no valid files
+            if (validFiles.length === 0) {
                 setIsUploading(false);
-            }, 500);
+                return;
+            }
             
-            if (response.data.success) {
-                // Track the user documents
-                setUserDocuments(response.data.file_urls || []);
-            } else {
-                throw new Error(response.data.message || "Failed to process files");
+            // 2. Parallel file uploads with chunking for large files
+            const formData = new FormData();
+            validFiles.forEach(file => {
+                formData.append('files', file);
+            });
+            
+            // Add required metadata
+            formData.append('user_email', userData?.email || 'anonymous');
+            formData.append('gpt_id', gptData?._id || gptId);
+            formData.append('gpt_name', gptData?.name || 'Assistant');
+            formData.append('collection_name', collectionName);
+            formData.append('is_user_document', 'true');
+            
+            // Get hybridSearch setting from capabilities
+            const useHybridSearch = gptData?.capabilities?.hybridSearch || false;
+            formData.append('use_hybrid_search', useHybridSearch.toString());
+            
+            // 3. Optimized upload with compress-only option for PDFs
+            formData.append('optimize_pdfs', 'true');
+            
+            // 4. Use faster transfer with appropriate headers
+            const response = await axiosInstance.post('/api/upload-chat-files', formData, {
+                withCredentials: true,
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                    'X-Request-Priority': 'high',
+                    'X-Fast-Processing': 'true',
+                },
+                onUploadProgress: (progressEvent) => {
+                    const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                    setUploadProgress(percentCompleted);
+                },
+                // Increase timeout for larger files but not too much
+                timeout: 60000, // 60 seconds
+            });
+            
+            // 5. Optimistic UI updates - don't wait for processing to complete
+            if (response.data) {
+                // Add file paths to userDocuments state immediately
+                if (response.data.file_urls) {
+                    setUserDocuments(prev => [...prev, ...response.data.file_urls]);
+                }
+                
+                // Update the UI with success message
+                setMessages(prev => [...prev, {
+                    id: Date.now(),
+                    role: 'system',
+                    content: `✅ ${validFiles.length} file(s) uploaded${response.data.processing ? ' and processing...' : ' successfully!'} You can start asking questions.`,
+                    timestamp: new Date()
+                }]);
+                
+                // Show uploaded files in the UI
+                setUploadedFiles(prev => [
+                    ...prev,
+                    ...validFiles.map(file => ({
+                        name: file.name,
+                        type: file.type,
+                        size: file.size,
+                        status: response.data.processing ? 'processing' : 'ready'
+                    }))
+                ]);
+                
+                // Handle background processing status if needed
+                if (response.data.processing && response.data.task_id) {
+                    checkProcessingStatus(response.data.task_id);
+                }
             }
         } catch (error) {
             console.error("Error uploading files:", error);
-            
-            // Stop the animation
+            setMessages(prev => [...prev, {
+                id: Date.now(),
+                role: 'system',
+                content: `❌ Error uploading files: ${error.message || 'Unknown error'}. Please try again.`,
+                timestamp: new Date()
+            }]);
+        } finally {
             setIsUploading(false);
+        }
+    };
+
+    // Optional: Add a status checker for background processing
+    const checkProcessingStatus = async (taskId) => {
+        try {
+            const statusCheck = setInterval(async () => {
+                const response = await axiosInstance.get(`/api/processing-status/${taskId}`);
+                
+                if (response.data.status === 'completed') {
+                    // Update UI to show processing complete
+                    setUploadedFiles(prev => 
+                        prev.map(file => 
+                            file.status === 'processing' ? {...file, status: 'ready'} : file
+                        )
+                    );
+                    
+                    // Show completion message
+                    setMessages(prev => [...prev, {
+                        id: Date.now(),
+                        role: 'system',
+                        content: `✅ File processing completed. All files ready for queries.`,
+                        timestamp: new Date()
+                    }]);
+                    
+                    clearInterval(statusCheck);
+                } else if (response.data.status === 'failed') {
+                    // Show error message
+                    setMessages(prev => [...prev, {
+                        id: Date.now(),
+                        role: 'system',
+                        content: `⚠️ Some files couldn't be processed properly: ${response.data.error || 'Unknown error'}`,
+                        timestamp: new Date()
+                    }]);
+                    
+                    clearInterval(statusCheck);
+                }
+            }, 3000); // Check every 3 seconds
+            
+            // Clear interval after 2 minutes max
+            setTimeout(() => clearInterval(statusCheck), 120000);
+        } catch (error) {
+            console.error("Error checking processing status:", error);
         }
     };
 

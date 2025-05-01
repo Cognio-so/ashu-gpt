@@ -124,23 +124,31 @@ const AdminChat = () => {
                 return;
             }
             
-            const fileUrls = gptData.knowledgeFiles?.map(file => file.fileUrl) || [];
+            // Only use remote file URLs, ensure no local file paths
+            const fileUrls = gptData.knowledgeFiles?.map(file => file.fileUrl).filter(url => 
+                url && (url.startsWith('http://') || url.startsWith('https://'))
+            ) || [];
             
             console.log("Notifying GPT opened:", gptData._id);
             
+            // Get hybridSearch setting from capabilities
+            const useHybridSearch = gptData.capabilities?.hybridSearch || false;
+            
             const response = await axios.post(
-                `${PYTHON_URL}/gpt-opened`, // Make sure PYTHON_URL is correctly defined
+                `${PYTHON_URL}/gpt-opened`,
                 {
                     user_email: userData.email,
                     gpt_name: gptData.name,
                     gpt_id: gptData._id,
                     file_urls: fileUrls,
-                    use_hybrid_search: gptData.capabilities?.hybridSearch || false,
+                    // Use the actual hybridSearch setting
+                    use_hybrid_search: useHybridSearch,
                     schema: {
                         model: gptData.model,
                         instructions: gptData.instructions,
                         capabilities: gptData.capabilities,
-                        use_hybrid_search: gptData.capabilities?.hybridSearch || false
+                        // Use the actual hybridSearch setting
+                        use_hybrid_search: useHybridSearch
                     }
                 },
                 {
@@ -321,6 +329,10 @@ const AdminChat = () => {
             
             // Create request payload with enhanced memory
             const chatCollectionName = collectionName || gptData?._id || "default_collection";
+            
+            // Get hybridSearch setting from capabilities
+            const useHybridSearch = gptData?.capabilities?.hybridSearch || false;
+            
             const payload = {
                 message,
                 collection_name: chatCollectionName,
@@ -331,7 +343,8 @@ const AdminChat = () => {
                     role: msg.role,
                     content: msg.content
                 })),
-                use_hybrid_search: gptData?.capabilities?.hybridSearch || false
+                // Use the actual hybridSearch setting
+                use_hybrid_search: useHybridSearch
             };
             
             // Try streaming first
@@ -494,7 +507,7 @@ const AdminChat = () => {
             }, 500);
             
             if (response.data.success) {
-                // Track the user documents
+                // Track the user documents - use remote URLs only
                 setUserDocuments(response.data.file_urls || []);
             } else {
                 throw new Error(response.data.message || "Failed to process files");
