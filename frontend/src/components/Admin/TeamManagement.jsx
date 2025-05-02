@@ -22,6 +22,7 @@ import EditPermissionsModal from './EditPermissionsModal';
 import { axiosInstance } from '../../api/axiosInstance';
 import { toast } from 'react-toastify';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext'; // Import useAuth
 
 // API URL from environment variables
 
@@ -59,6 +60,7 @@ const TeamManagement = () => {
     const [showEditPermissionsModal, setShowEditPermissionsModal] = useState(false);
     const [selectedMemberForPermissions, setSelectedMemberForPermissions] = useState(null);
     const { isDarkMode } = useTheme();
+    const { user } = useAuth(); // Get current user from auth context
     const actionsMenuRef = useRef(null);
     const departmentFilterRef = useRef(null);
     const statusFilterRef = useRef(null);
@@ -96,7 +98,7 @@ const TeamManagement = () => {
         });
     };
     
-    // IMPROVEMENT 1: Combined data fetching in one call
+    // Fetch team data with GPT counts
     const fetchTeamData = useCallback(async (refresh = false) => {
         if (!refresh && teamMembers.length > 0) return; // Don't reload if data exists
         
@@ -143,7 +145,7 @@ const TeamManagement = () => {
         } finally {
             setLoading(false);
         }
-    }, [page, pageSize]); 
+    }, [page, pageSize, teamMembers.length]); 
 
     // Initial mount effect
     useEffect(() => {
@@ -155,7 +157,7 @@ const TeamManagement = () => {
         }
     }, [fetchTeamData, page, cachedMembers]);
     
-    // IMPROVEMENT 2: Reduced polling frequency (30s instead of 10s)
+    // Reduced polling frequency
     useEffect(() => {
         // Only set up interval if component is mounted and visible
         const interval = setInterval(() => {
@@ -274,6 +276,10 @@ const TeamManagement = () => {
     };
 
     const handleViewMemberDetails = (member) => {
+        // Don't allow viewing details of the current user
+        if (user?._id === member.id) {
+            return;
+        }
         setSelectedMemberForDetails(member);
         setShowDetailsModal(true);
     };
@@ -305,21 +311,42 @@ const TeamManagement = () => {
     
     // Handle remove team member
     const handleRemoveTeamMember = async (memberId) => {
-        if (window.confirm("Are you sure you want to remove this team member?")) {
+        if (window.confirm("Are you sure you want to remove this team member? All their data including chat histories and assignments will be permanently deleted.")) {
             try {
-                // This endpoint would need to be implemented in the backend
-                await axiosInstance.delete(`/api/auth/users/${memberId}`, {
+                setLoading(true);
+                const response = await axiosInstance.delete(`/api/auth/users/${memberId}`, {
                     withCredentials: true
                 });
                 
-                // Remove user from local state
-                setTeamMembers(prev => prev.filter(member => member.id !== memberId));
-                toast?.success("Team member removed successfully");
+                if (response.data.success) {
+                    // Remove user from local state
+                    setTeamMembers(prev => prev.filter(member => member.id !== memberId));
+                    
+                    // Also update the cache
+                    setCachedMembers(prev => {
+                        const newCache = {...prev};
+                        for (const pageKey in newCache) {
+                            if (newCache[pageKey]) {
+                                newCache[pageKey] = newCache[pageKey].filter(member => member.id !== memberId);
+                            }
+                        }
+                        return newCache;
+                    });
+                    
+                    // Update the total count
+                    setTotalMembers(prev => Math.max(0, prev - 1));
+                    
+                    toast.success("Team member and all associated data removed successfully");
+                }
             } catch (err) {
                 handleApiError(err, "Failed to remove team member");
+            } finally {
+                setLoading(false);
+                setShowActionsMenu(null);
             }
+        } else {
+            setShowActionsMenu(null);
         }
-        setShowActionsMenu(null);
     };
 
     // Add function to handle permission updates
@@ -333,7 +360,12 @@ const TeamManagement = () => {
 
     // Mobile card view for team members
     const MobileTeamMemberCard = ({ member }) => (
-        <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow border border-gray-200 dark:border-gray-700 mb-3" onClick={() => handleViewMemberDetails(member)}>
+        <div 
+            className={`bg-white dark:bg-gray-800 p-4 rounded-lg shadow border border-gray-200 dark:border-gray-700 mb-3 ${
+                user?._id === member.id ? 'opacity-80' : 'cursor-pointer'
+            }`} 
+            onClick={() => user?._id !== member.id && handleViewMemberDetails(member)}
+        >
             <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center">
                     <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600 flex items-center justify-center mr-3">
@@ -342,10 +374,19 @@ const TeamManagement = () => {
                     <div>
                         <p className="font-semibold text-gray-900 dark:text-white">{member.name}</p>
                         <p className="text-sm text-gray-500 dark:text-gray-400">{member.email}</p>
+                        {user?._id === member.id && (
+                            <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-2 py-0.5 rounded-full mt-1 inline-block">
+                                You
+                            </span>
+                        )}
                     </div>
                 </div>
-                <FiChevronRight className="text-gray-400 dark:text-gray-500" />
-                        </div>
+                {user?._id !== member.id ? (
+                    <FiChevronRight className="text-gray-400 dark:text-gray-500" />
+                ) : (
+                    <span className="text-xs text-gray-400 italic">Current user</span>
+                )}
+            </div>
             <div className="text-sm space-y-1">
                 <p><strong className="text-gray-600 dark:text-gray-300">Role:</strong> {member.role}</p>
                 <p><strong className="text-gray-600 dark:text-gray-300">Department:</strong> {member.department}</p>
@@ -403,71 +444,71 @@ const TeamManagement = () => {
             <div className="mb-6 flex-shrink-0">
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">Team Management</h1>
                 <p className="text-gray-600 dark:text-gray-400">Manage your team members, permissions, and GPT assignments.</p>
-                </div>
+            </div>
                 
             <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 flex-shrink-0">
                 <div className="relative flex-grow sm:flex-grow-0 sm:w-64 md:w-72">
                     <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-                        <input
-                            type="text"
+                    <input
+                        type="text"
                         placeholder="Search members..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
                         className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-black dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
-                        />
-                    </div>
+                    />
+                </div>
                     
                 <div className="flex items-center gap-3">
                     <div className="relative" ref={departmentFilterRef}>
-                            <button 
+                        <button 
                             onClick={() => setShowDepartmentsDropdown(!showDepartmentsDropdown)}
                             className="flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
                         >
                             <FiFilter size={14} />
                             <span>{selectedDepartment === 'All Departments' ? 'Department' : selectedDepartment}</span>
                             <FiChevronDown size={16} className={`transition-transform ${showDepartmentsDropdown ? 'rotate-180' : ''}`} />
-                            </button>
-                            {showDepartmentsDropdown && (
+                        </button>
+                        {showDepartmentsDropdown && (
                             <div className="absolute left-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 dark:ring-gray-700 z-10 overflow-hidden">
-                                       {departments.map(dept => (
-                                           <button 
-                                               key={dept}
+                                {departments.map(dept => (
+                                    <button 
+                                        key={dept}
                                         onClick={() => { setSelectedDepartment(dept); setShowDepartmentsDropdown(false); }}
                                         className={`w-full text-left px-4 py-2 text-sm flex items-center justify-between ${selectedDepartment === dept ? 'font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
-                                           >
-                                               {dept}
+                                    >
+                                        {dept}
                                         {selectedDepartment === dept && <FiCheck size={14} />}
-                                           </button>
-                                       ))}
-                               </div>
-                            )}
-                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                     <div className="relative" ref={statusFilterRef}>
-                            <button 
+                        <button 
                             onClick={() => setShowStatusDropdown(!showStatusDropdown)}
                             className="flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
                         >
                             <FiUsers size={14}/>
                             <span>{selectedStatus}</span>
                             <FiChevronDown size={16} className={`transition-transform ${showStatusDropdown ? 'rotate-180' : ''}`} />
-                            </button>
-                            {showStatusDropdown && (
+                        </button>
+                        {showStatusDropdown && (
                             <div className="absolute left-0 mt-2 w-40 bg-white dark:bg-gray-800 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 dark:ring-gray-700 z-10 overflow-hidden">
                                 {['All Status', 'Active', 'Inactive'].map(status => (
-                                        <button 
+                                    <button 
                                         key={status}
                                         onClick={() => { setSelectedStatus(status); setShowStatusDropdown(false); }}
                                         className={`w-full text-left px-4 py-2 text-sm flex items-center justify-between ${selectedStatus === status ? 'font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
                                     >
                                         {status}
                                         {selectedStatus === status && <FiCheck size={14} />}
-                                        </button>
+                                    </button>
                                 ))}
-                                </div>
-                            )}
-                        </div>
+                            </div>
+                        )}
+                    </div>
 
-                                                    <button
+                    <button
                         onClick={handleInviteMember}
                         className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors relative"
                     >
@@ -502,22 +543,26 @@ const TeamManagement = () => {
                                             {header}
                                         </th>
                                     ))}
-                                    </tr>
-                                </thead>
+                                </tr>
+                            </thead>
                             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                                 {filteredMembers.length > 0 ? filteredMembers.map((member) => (
-                                    <tr key={member.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                                        <td className="px-6 py-4 whitespace-nowrap cursor-pointer" onClick={() => handleViewMemberDetails(member)}>
-                                                    <div className="flex items-center">
+                                    <tr 
+                                        key={member.id} 
+                                        className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                                        onClick={() => user?._id !== member.id && handleViewMemberDetails(member)}
+                                    >
+                                        <td className="px-6 py-4 whitespace-nowrap cursor-pointer" onClick={() => user?._id !== member.id && handleViewMemberDetails(member)}>
+                                            <div className="flex items-center">
                                                 <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gray-200 dark:bg-gray-600 flex items-center justify-center">
                                                     <FiUser className="text-gray-600 dark:text-gray-300" />
-                                                        </div>
+                                                </div>
                                                 <div className="ml-4">
                                                     <div className="text-sm font-medium text-gray-900 dark:text-white">{member.name}</div>
                                                     <div className="text-sm text-gray-500 dark:text-gray-400">{member.email}</div>
-                                                        </div>
-                                                    </div>
-                                                </td>
+                                                </div>
+                                            </div>
+                                        </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{member.role}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{member.department}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-center text-gray-700 dark:text-gray-300">{member.assignedGPTs}</td>
@@ -527,21 +572,23 @@ const TeamManagement = () => {
                                                     ? 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300'
                                                     : 'bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-300'
                                             }`}>
-                                                        {member.status}
-                                                    </span>
-                                                </td>
+                                                {member.status}
+                                            </span>
+                                        </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{member.joined}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{member.lastActive}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium relative">
-                                                    <button
+                                            <button
                                                 onClick={(e) => { e.stopPropagation(); toggleActionsMenu(member.id); }}
-                                                className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"
+                                                className={`text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 ${user?._id === member.id ? 'opacity-50 cursor-not-allowed' : ''}`}
                                                 data-member-id={member.id}
-                                                    >
+                                                disabled={user?._id === member.id}
+                                                title={user?._id === member.id ? "You cannot modify your own account" : ""}
+                                            >
                                                 <FiMoreVertical size={18} />
-                                                    </button>
-                                                </td>
-                                            </tr>
+                                            </button>
+                                        </td>
+                                    </tr>
                                 )) : (
                                     <tr>
                                         <td colSpan="8" className="px-6 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
@@ -549,24 +596,40 @@ const TeamManagement = () => {
                                         </td>
                                     </tr>
                                 )}
-                                    </tbody>
-                                </table>
+                            </tbody>
+                        </table>
                     </div>
-                    )}
-                </div>
+                )}
+            </div>
             
             {/* Add pagination at the bottom */}
             {!loading && !error && filteredMembers.length > 0 && renderPagination()}
 
-            {/* Render action menus outside of the table completely */}
+            {/* Render action menus with fixed position - FIX FOR THREEDDOTS DROPDOWN MENU ALIGNMENT */}
             {showActionsMenu && filteredMembers.map((member) => (
-                member.id === showActionsMenu && (
+                member.id === showActionsMenu && user?._id !== member.id && (
                     <div 
                         key={`menu-${member.id}`}
                         className="fixed z-50" 
-                        style={{ 
-                            top: `${document.querySelector(`[data-member-id="${member.id}"]`)?.getBoundingClientRect().bottom + window.scrollY}px`,
-                            left: `${document.querySelector(`[data-member-id="${member.id}"]`)?.getBoundingClientRect().right - 170 + window.scrollX}px` 
+                        ref={node => {
+                            if (node) {
+                                const buttonRect = document.querySelector(`[data-member-id="${member.id}"]`)?.getBoundingClientRect();
+                                if (buttonRect) {
+                                    // Improved positioning for the dropdown with better alignment
+                                    const isNearRightEdge = window.innerWidth - buttonRect.right < 200;
+                                    
+                                    node.style.top = `${buttonRect.bottom + window.scrollY + 5}px`;
+                                    
+                                    // If near the right edge of the screen, align right edge of dropdown with button
+                                    if (isNearRightEdge) {
+                                        node.style.right = `${window.innerWidth - buttonRect.right - window.scrollX}px`;
+                                        node.style.left = 'auto';
+                                    } else {
+                                        // Otherwise center the dropdown below the button
+                                        node.style.left = `${buttonRect.left + window.scrollX - 60}px`;
+                                    }
+                                }
+                            }
                         }}
                     >
                         <div

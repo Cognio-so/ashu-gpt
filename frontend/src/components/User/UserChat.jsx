@@ -12,6 +12,9 @@ import axios from 'axios';
 import { IoClose } from 'react-icons/io5';
 import { FaFilePdf, FaFileWord, FaFileAlt, FaFile } from 'react-icons/fa';
 
+const pythonApiUrl = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:8000';
+
+
 const UserChat = () => {
     const location = useLocation();
     const navigate = useNavigate();
@@ -28,7 +31,6 @@ const UserChat = () => {
     });
     const [gptData, setGptData] = useState(null);
     const [messages, setMessages] = useState([]);
-    const messagesEndRef = useRef(null);
     const [collectionName, setCollectionName] = useState('');
     const [uploadedFiles, setUploadedFiles] = useState([]);
     const [isUploading, setIsUploading] = useState(false);
@@ -37,6 +39,8 @@ const UserChat = () => {
     const [hasInteracted, setHasInteracted] = useState(false);
     const [conversationMemory, setConversationMemory] = useState([]);
     const [shouldLoadHistory, setShouldLoadHistory] = useState(false);
+    const [isInitialLoading, setIsInitialLoading] = useState(false);
+    const messagesEndRef = useRef(null);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -48,138 +52,129 @@ const UserChat = () => {
         }
     }, [user]);
     
-    const loadChatHistory = async (id) => {
-        if (!id || !user?._id) return;
-        
-        try {
-            setLoading(prev => ({ ...prev, history: true }));
-            
-            const response = await axiosInstance.get(`/api/chat-history/conversation/${user._id}/${id}`, {
-                withCredentials: true
-            });
-            
-            if (response.data && response.data.success && response.data.conversation) {
-                const { conversation } = response.data;
-                
-                // Only populate if we have messages
-                if (conversation.messages && conversation.messages.length > 0) {
-                    // Format messages for display
-                    const formattedMessages = conversation.messages.map((msg, index) => ({
-                        id: Date.now() - (conversation.messages.length - index),
-                        role: msg.role,
-                        content: msg.content,
-                        timestamp: new Date(msg.timestamp || conversation.createdAt)
-                    }));
-                    
-                    setMessages(formattedMessages);
-                    
-                    // Update conversation memory for context
-                    setConversationMemory(conversation.messages.slice(-10).map(msg => ({
-                        role: msg.role,
-                        content: msg.content,
-                        timestamp: msg.timestamp || conversation.createdAt
-                    })));
-                    
-                    console.log(`Loaded ${formattedMessages.length} messages from conversation history`);
-                }
-            }
-        } catch (error) {
-            console.error("Error loading conversation history:", error);
-        } finally {
-            setLoading(prev => ({ ...prev, history: false }));
-        }
-    };
-
     useEffect(() => {
+        // --- Step 1: Basic Guard Clauses ---
         if (!gptId) {
+            // If there's no GPT ID, clear everything and stop.
             setGptData(null);
             setMessages([]);
+            setConversationMemory([]);
+            setIsInitialLoading(false);
             return;
         }
-        
-        // Check if we should load history based on URL
+
+        // --- Step 2: Wait for Authentication to Settle ---
+        // If authentication is still loading, do nothing yet. Show loading indicator.
+        if (authLoading) {
+            console.log("Auth loading, waiting...");
+            setIsInitialLoading(true); // Keep showing loading while waiting
+            return;
+        }
+
+        // --- Step 3: Handle Post-Auth State (User Loaded or Not) ---
+        // If auth is finished, but there's no user, stop loading and show appropriate message.
+        if (!authLoading && !user) {
+            console.warn("Auth finished, but no user. Aborting fetch.");
+            setIsInitialLoading(false); // Stop loading
+            setGptData({ _id: gptId, name: "GPT Assistant", description: "Login required to load chat.", model: "gpt-4o-mini" });
+            setMessages([]);
+            setConversationMemory([]);
+            return;
+        }
+
+        // --- Step 4: Conditions Met - Proceed with Fetch ---
+        // If we reach here: gptId exists, authLoading is false, and user exists.
+        console.log("Conditions met (gptId, user loaded). Starting fetchInitialData.");
+        setIsInitialLoading(true); // Ensure loading is true before fetch starts
+
         const fromHistory = location.state?.fromHistory || location.search.includes('loadHistory=true');
-        setShouldLoadHistory(fromHistory);
-        
-        const fetchGptData = async () => {
+
+        const fetchInitialData = async () => {
+            let fetchedGptData = null;
+            let gptDataIdToLoad = gptId;
+            let historyMessages = [];
+            let historyMemory = [];
+
             try {
-                setLoading(prev => ({ ...prev, gpt: true }));
-                
-                const response = await axiosInstance.get(`/api/custom-gpts/user/assigned/${gptId}`, { 
-                    withCredentials: true 
-                });
-                
-                let gptDataId = gptId; // Default fallback ID
-                
-                if (response.data && response.data.success && response.data.customGpt) {
-                    const customGpt = response.data.customGpt;
-                    setGptData(customGpt);
-                    gptDataId = customGpt._id; // Set the actual ID from response
-                    
-                    // Create a collection name for RAG
-                    const sanitizedEmail = (userData?.email || 'user').replace(/[^a-zA-Z0-9]/g, '_');
-                    const sanitizedGptName = (customGpt.name || 'gpt').replace(/[^a-zA-Z0-9]/g, '_');
-                    const collectionName = `kb_${sanitizedEmail}_${sanitizedGptName}_${gptId}`;
-                    setCollectionName(collectionName);
-                    
-                    // Try to notify backend (non-blocking)
-                    try {
-                        notifyGptOpened(customGpt, userData)
-                            .then(result => console.log("GPT opened notification result:", result))
-                            .catch(notifyErr => console.warn("Failed to notify GPT opened:", notifyErr));
-                    } catch (notifyErr) {
-                        console.warn("Error preparing GPT notification:", notifyErr);
-                    }
-                    
-                    // Only load history if coming from history page
-                    if (fromHistory && user?._id) {
-                        await loadChatHistory(gptDataId);
+                // Fetch GPT Data
+                console.log("[fetchInitialData] Fetching GPT data for:", gptId);
+                const gptResponse = await axiosInstance.get(`/api/custom-gpts/user/assigned/${gptId}`, { withCredentials: true });
+
+                if (gptResponse.data?.success && gptResponse.data.customGpt) {
+                    fetchedGptData = gptResponse.data.customGpt;
+                    gptDataIdToLoad = fetchedGptData._id;
+                    console.log("[fetchInitialData] GPT data fetched:", fetchedGptData.name);
+                } else {
+                    console.warn("[fetchInitialData] Failed GPT fetch:", gptResponse.data);
+                    fetchedGptData = { _id: gptId, name: "GPT Assistant", description: "Assistant details unavailable.", model: "gpt-4o-mini" };
+                }
+
+                // Set GPT Data *before* history load
+                setGptData(fetchedGptData);
+                const sanitizedEmail = (user.email || 'user').replace(/[^a-zA-Z0-9]/g, '_');
+                const sanitizedGptName = (fetchedGptData.name || 'gpt').replace(/[^a-zA-Z0-9]/g, '_');
+                setCollectionName(`kb_${sanitizedEmail}_${sanitizedGptName}_${gptId}`);
+                notifyGptOpened(fetchedGptData, user).catch(err => console.warn("[fetchInitialData] Notify error:", err));
+
+                // Load History if needed
+                if (fromHistory) {
+                    console.log("[fetchInitialData] Loading history for GPT ID:", gptDataIdToLoad);
+                    const historyResponse = await axiosInstance.get(`/api/chat-history/conversation/${user._id}/${gptDataIdToLoad}`, { withCredentials: true });
+
+                    if (historyResponse.data?.success && historyResponse.data.conversation?.messages?.length > 0) {
+                        const { conversation } = historyResponse.data;
+                        // Use a more robust unique key if possible, combining conv id and timestamp/index
+                        historyMessages = conversation.messages.map((msg, index) => ({
+                            id: `${conversation._id}-${index}-${msg.timestamp || Date.now()}`, 
+                            role: msg.role,
+                            content: msg.content,
+                            timestamp: new Date(msg.timestamp || conversation.createdAt)
+                        }));
+                        historyMemory = conversation.messages.slice(-10).map(msg => ({
+                            role: msg.role,
+                            content: msg.content,
+                            timestamp: msg.timestamp || conversation.createdAt
+                        }));
+                        console.log(`[fetchInitialData] Loaded ${historyMessages.length} messages from history.`);
+                    } else {
+                        console.log("[fetchInitialData] No history found or history load failed.");
+                        historyMessages = [];
+                        historyMemory = [];
                     }
                 } else {
-                    // Handle case where the API returned success: false or missing customGpt
-                    console.warn("Failed to load GPT data or invalid response format:", response.data);
-                    
-                    // Set a fallback GPT object
-                    setGptData({
-                        _id: gptId,
-                        name: "GPT Assistant",
-                        description: "This GPT may not be available right now.",
-                        model: "gpt-4o-mini"
-                    });
-                    
-                    // Set a fallback collection name
-                    setCollectionName(`kb_user_${gptId}`);
-                    
-                    // Only load history if coming from history page
-                    if (fromHistory && user?._id) {
-                        await loadChatHistory(gptId);
-                    }
+                    historyMessages = [];
+                    historyMemory = [];
                 }
+
+                // Set Messages & Memory *after* all fetches are done
+                setMessages(historyMessages);
+                setConversationMemory(historyMemory);
+                console.log("[fetchInitialData] Messages and memory state updated.");
+
             } catch (err) {
-                console.error("Error fetching GPT data:", err);
-                
-                // Set a fallback GPT object
-                setGptData({
-                    _id: gptId,
-                    name: "GPT Assistant",
-                    description: "This GPT may not be available right now.",
-                    model: "gpt-4o-mini"
-                });
-                
-                // Set a fallback collection name
+                console.error("[fetchInitialData] Error during fetch:", err);
+                setGptData({ _id: gptId, name: "GPT Assistant", description: "Error loading assistant.", model: "gpt-4o-mini" });
                 setCollectionName(`kb_user_${gptId}`);
-                
-                // Only load history if coming from history page
-                if (fromHistory && user?._id) {
-                    await loadChatHistory(gptId);
-                }
+                setMessages([]);
+                setConversationMemory([]);
             } finally {
-                setLoading(prev => ({ ...prev, gpt: false }));
+                // Mark initial loading complete *only* after try/catch finishes
+                console.log("[fetchInitialData] Process complete. Setting isInitialLoading to false.");
+                setIsInitialLoading(false);
             }
         };
-        
-        fetchGptData();
-    }, [gptId, userData, user, location]);
+
+        fetchInitialData(); // Execute the fetch logic
+
+        // Cleanup function: Reset loading states if dependencies change mid-fetch
+        return () => {
+            console.log("useEffect cleanup: Resetting loading states.");
+            setIsInitialLoading(false);
+            setLoading(prev => ({ ...prev, gpt: false, history: false })); // Clear old flags too
+        };
+
+    // Dependencies: Only re-run if these core identifiers change.
+    }, [gptId, user, authLoading, location.state, location.search]); // Keep authLoading & user to trigger run *after* auth resolves
 
     const predefinedPrompts = [
         {
@@ -266,15 +261,21 @@ const UserChat = () => {
 
         setConversationMemory(prev => [...prev, { role: 'user', content: message, timestamp: new Date() }].slice(-10));
 
-        const assistantMessage = {
-            id: Date.now() + 1,
-            role: 'assistant',
-            content: '',
-            isLoading: true,
-            timestamp: new Date()
-        };
-        setMessages(prev => [...prev, assistantMessage]);
         setLoading(prev => ({ ...prev, message: true }));
+
+        // Add a definitive placeholder for the streaming response
+        const assistantMessageId = Date.now() + 1; // Unique ID for this response
+        setMessages(prev => [
+            ...prev, 
+            {
+                id: assistantMessageId,
+            role: 'assistant',
+                content: '', // Start empty
+                isLoading: false, // We'll use isStreaming to show activity
+                isStreaming: true, // Mark as actively streaming
+            timestamp: new Date()
+            }
+        ]);
 
         // Backend API Call
         try {
@@ -289,193 +290,151 @@ const UserChat = () => {
                 history: recentHistory, // Send formatted recent history
                 memory: conversationMemory, // Send current memory state
                 user_documents: userDocuments,
-                use_hybrid_search: gptData?.use_hybrid_search || false // Default to false if not set
+                use_hybrid_search: gptData?.capabilities?.hybridSearch || false // Default to false if not set
             };
             
             console.log("Sending to /chat-stream:", payload);
 
-            const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/chat-stream`, {
+            const response = await fetch(`${pythonApiUrl}/chat-stream`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Accept': 'text/event-stream',
-                    // Add authorization if needed, handled by axiosInstance interceptor if using it
-                    // 'Authorization': `Bearer ${getAccessToken()}` 
                 },
                 body: JSON.stringify(payload),
-                // If using fetch directly, ensure credentials are sent if required by CORS
                 credentials: 'include' 
             });
 
             if (!response.ok) {
-                throw new Error(`API error: ${response.status} ${response.statusText}`);
+                // Handle fetch error: Update the placeholder message with the error
+                setMessages(prev => prev.map(msg => 
+                    msg.id === assistantMessageId 
+                    ? { ...msg, content: `Error: ${response.status} ${response.statusText}`, isStreaming: false, isLoading: false, isError: true } 
+                    : msg
+                ));
+                setLoading(prev => ({ ...prev, message: false })); // Stop loading
+                saveMessageToHistory(`Error: ${response.status} ${response.statusText}`, 'assistant'); // Save error
+                return; // Stop further processing
             }
             
             if (response.body) {
-                await handleStreamingResponse(response, saveMessageToHistory);
+                // Pass the specific message ID to the handler
+                await handleStreamingResponse(response, saveMessageToHistory, assistantMessageId);
             } else {
-                throw new Error("Response body is null");
+                // Handle null body error: Update placeholder
+                setMessages(prev => prev.map(msg => 
+                    msg.id === assistantMessageId 
+                    ? { ...msg, content: "Error: Received empty response body", isStreaming: false, isLoading: false, isError: true } 
+                    : msg
+                ));
+                setLoading(prev => ({ ...prev, message: false })); // Stop loading
+                saveMessageToHistory("Error: Received empty response body", 'assistant'); // Save error
+                return; // Stop further processing
             }
 
         } catch (error) {
+            // Handle general catch error: Update placeholder
             console.error("Error calling chat stream API:", error);
             setMessages(prev => prev.map(msg => 
-                msg.id === assistantMessage.id 
-                ? { ...msg, content: `Error: ${error.message}`, isLoading: false } 
+                msg.id === assistantMessageId 
+                ? { ...msg, content: `Error: ${error.message}`, isStreaming: false, isLoading: false, isError: true } 
                 : msg
             ));
-            setLoading(prev => ({ ...prev, message: false }));
-            
-            // Optionally save error to history
-            saveMessageToHistory(`Error processing request: ${error.message}`, 'assistant');
+            setLoading(prev => ({ ...prev, message: false })); // Stop loading
+            saveMessageToHistory(`Error processing request: ${error.message}`, 'assistant'); // Save error
         }
     };
 
-    // Fix the handleStreamingResponse function to properly save assistant messages
-    const handleStreamingResponse = async (response, saveMessageToHistory) => {
-        // Add connection timeout handling
-        const TIMEOUT_MS = 30000; // 30 seconds
-        let timeoutId = setTimeout(() => {
-            console.error("Streaming response timed out");
-            setLoading(prev => ({ ...prev, message: false }));
-            setMessages(prev => [...prev, {
-                id: Date.now(),
-                role: 'system',
-                content: "❌ Response timed out. Please try again.",
-                timestamp: new Date()
-            }]);
-        }, TIMEOUT_MS);
-        
-        // Rest of the implementation remains the same, just add:
-        // Clear timeout when response starts streaming
-        clearTimeout(timeoutId);
-        
-        // Add chunk buffering for more efficient rendering
-        let messageBuffer = "";
-        const BUFFER_INTERVAL = 100; // ms
-        let lastRenderTime = Date.now();
-        
+    const handleStreamingResponse = async (response, saveMessageToHistory, messageId) => {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        let streamingMessageId = Date.now() + 1;
-        
-        // Create initial streaming message
-        const initialMessage = {
-            id: streamingMessageId,
-            role: 'assistant',
-            content: '',
-            isStreaming: true,
-            timestamp: new Date()
-        };
-        
-        setMessages(prev => [...prev, initialMessage]);
-        
+        let buffer = ""; // Accumulates the full response content
+        let doneStreaming = false;
+
+        console.log(`[Stream ${messageId}] Starting to read stream.`);
+
         try {
-            while (true) {
+            while (!doneStreaming) {
                 const { done, value } = await reader.read();
                 
                 if (done) {
-                    // Explicitly log the complete content to debug
-                    console.log('Stream complete, saving assistant message:', messageBuffer.substring(0, 50) + '...');
-                    
-                    // Save the complete message to history - IMPORTANT FIX HERE
-                    if (messageBuffer && messageBuffer.trim()) {
-                        try {
-                            // Make sure this call happens and isn't blocked
-                            const saveResult = await saveMessageToHistory(messageBuffer, 'assistant');
-                            console.log('Assistant message saved result:', saveResult);
-                        } catch (saveError) {
-                            console.error('Failed to save assistant message:', saveError);
-                        }
-                    } else {
-                        console.warn('No content to save for assistant message');
-                    }
-                    
-                    // Update the conversation memory only after saving
-                    setConversationMemory(prev => [...prev, {
-                        role: 'assistant',
-                        content: messageBuffer,
-                        timestamp: new Date().toISOString()
-                    }]);
-                    
-                    // Mark streaming as complete
-                    setMessages(prev => prev.map(msg => 
-                        msg.id === streamingMessageId ? { ...msg, isStreaming: false } : msg
-                    ));
-                    break;
+                    console.log(`[Stream ${messageId}] Stream finished.`);
+                    doneStreaming = true;
+                    break; // Exit the loop
                 }
-                
-                const text = decoder.decode(value, {stream: true});
-                const lines = text.split('\n').filter(line => line.trim());
+
+                const chunk = decoder.decode(value, { stream: true });
+                const lines = chunk.split('\n').filter(line => line.trim().startsWith('data: '));
                 
                 for (const line of lines) {
-                    if (line.startsWith('data: ')) {
                         try {
                             const jsonStr = line.substring(6);
                             const parsed = JSON.parse(jsonStr);
                             
                             if (parsed.error) {
-                                console.error("Streaming Error:", parsed.error);
-                                const errorContent = `Error: ${parsed.error}`;
+                            console.error(`[Stream ${messageId}] Streaming Error:`, parsed.error);
+                            buffer = `Error: ${parsed.error}`; // Update buffer with error
+                            doneStreaming = true; // Treat error as end of stream
                                 setMessages(prev => prev.map(msg => 
-                                    msg.id === streamingMessageId ? 
-                                    { ...msg, content: errorContent, isStreaming: false } : 
-                                    msg
+                                msg.id === messageId ? { ...msg, content: buffer, isStreaming: false, isError: true } : msg
                                 ));
-                                await saveMessageToHistory(errorContent, 'assistant');
-                                return;
+                            break; // Stop processing lines for this chunk on error
                             }
                             
                             if (parsed.done === true) {
-                                // Make sure we save the message before marking as done
-                                if (messageBuffer && messageBuffer.trim()) {
-                                    try {
-                                        await saveMessageToHistory(messageBuffer, 'assistant');
-                                        console.log('Assistant message saved on done signal');
-                                    } catch (saveError) {
-                                        console.error('Failed to save assistant message on done:', saveError);
-                                    }
-                                }
-                                
-                                setMessages(prev => prev.map(msg => 
-                                    msg.id === streamingMessageId ? { ...msg, isStreaming: false } : msg
-                                ));
-                                return;
+                            console.log(`[Stream ${messageId}] Done signal received.`);
+                            doneStreaming = true; // Mark as done
+                            break; // Stop processing lines for this chunk
                             }
                             
                             if (parsed.content) {
-                                messageBuffer += parsed.content; // Add to complete content
+                            buffer += parsed.content; // Append content to the buffer
+                            // Update the specific message content progressively
                                 setMessages(prev => prev.map(msg => 
-                                    msg.id === streamingMessageId ? 
-                                    { ...msg, content: msg.content + parsed.content } : 
-                                    msg
+                                msg.id === messageId ? { ...msg, content: buffer, isStreaming: true, isError: false } : msg 
                                 ));
                             }
                         } catch (e) {
-                            console.error("Error parsing streaming line:", e, "Line:", line);
-                        }
+                        console.error(`[Stream ${messageId}] Error parsing line:`, e, "Line:", line);
+                        // Continue to next line if parsing fails
                     }
-                }
-                
-                // Only update UI every BUFFER_INTERVAL ms for better performance
-                if (Date.now() - lastRenderTime > BUFFER_INTERVAL) {
-                    setMessages(prev => {
-                        const updatedMessages = [...prev];
-                        updatedMessages[updatedMessages.length - 1].content = messageBuffer;
-                        return updatedMessages;
-                    });
-                    lastRenderTime = Date.now();
-                }
-            }
-        } catch (err) {
-            console.error("Error reading stream:", err);
-            const errorContent = "Error reading response stream.";
+                } // end for loop over lines
+            } // end while loop reading stream
+
+            // --- Final Update After Stream Ends ---
+            console.log(`[Stream ${messageId}] Finalizing state. Full content length: ${buffer.length}`);
             setMessages(prev => prev.map(msg => 
-                msg.id === streamingMessageId ? 
-                { ...msg, content: errorContent, isStreaming: false } : 
-                msg
+                msg.id === messageId 
+                ? { 
+                    ...msg, 
+                    content: buffer || (msg.isError ? msg.content : "Empty response"), // Keep error content if it occurred
+                    isStreaming: false, // Mark as finished streaming
+                    isLoading: false,
+                    isError: msg.isError || !buffer.trim() // Mark error if buffer is empty or error previously set
+                  } 
+                : msg
             ));
-            await saveMessageToHistory(errorContent, 'assistant');
+
+            // Save the final content (or error) to history
+            if (buffer || messages.find(m => m.id === messageId)?.isError) {
+                 await saveMessageToHistory(buffer || messages.find(m => m.id === messageId)?.content, 'assistant');
+                 console.log(`[Stream ${messageId}] Final message saved to history.`);
+            } else {
+                 console.warn(`[Stream ${messageId}] No final content buffer to save.`);
+            }
+
+        } catch (err) {
+            console.error(`[Stream ${messageId}] Error reading stream:`, err);
+            // Update the placeholder with stream reading error
+            setMessages(prev => prev.map(msg => 
+                msg.id === messageId 
+                ? { ...msg, content: "Error reading response stream.", isStreaming: false, isLoading: false, isError: true } 
+                : msg
+            ));
+             await saveMessageToHistory("Error reading response stream.", 'assistant'); // Save error
+        } finally {
+            console.log(`[Stream ${messageId}] Cleaning up. Setting loading to false.`);
+            setLoading(prev => ({ ...prev, message: false })); // Ensure loading always stops
         }
     };
 
@@ -628,7 +587,7 @@ const UserChat = () => {
             formData.append('optimize_pdfs', 'true');
             
             // 4. Use faster transfer with appropriate headers
-            const response = await axiosInstance.post('/api/upload-chat-files', formData, {
+            const response = await axios.post(`${pythonApiUrl}/upload-chat-files`, formData, {
                 withCredentials: true,
                 headers: {
                     'Content-Type': 'multipart/form-data',
@@ -650,13 +609,8 @@ const UserChat = () => {
                     setUserDocuments(prev => [...prev, ...response.data.file_urls]);
                 }
                 
-                // Update the UI with success message
-                setMessages(prev => [...prev, {
-                    id: Date.now(),
-                    role: 'system',
-                    content: `✅ ${validFiles.length} file(s) uploaded${response.data.processing ? ' and processing...' : ' successfully!'} You can start asking questions.`,
-                    timestamp: new Date()
-                }]);
+                // Don't add system message for file uploads - silently process in the background
+                console.log(`✅ ${validFiles.length} file(s) uploaded${response.data.processing ? ' and processing...' : ' successfully!'}`);
                 
                 // Show uploaded files in the UI
                 setUploadedFiles(prev => [
@@ -701,13 +655,8 @@ const UserChat = () => {
                         )
                     );
                     
-                    // Show completion message
-                    setMessages(prev => [...prev, {
-                        id: Date.now(),
-                        role: 'system',
-                        content: `✅ File processing completed. All files ready for queries.`,
-                        timestamp: new Date()
-                    }]);
+                    // Silently complete processing without adding system message
+                    console.log('✅ File processing completed. All files ready for queries.');
                     
                     clearInterval(statusCheck);
                 } else if (response.data.status === 'failed') {
@@ -858,18 +807,21 @@ const UserChat = () => {
             
             <div className="flex-1 overflow-y-auto p-4 no-scrollbar">
                 <div className="w-full max-w-3xl mx-auto flex flex-col space-y-4">
-                    {loading.gpt || loading.history ? (
-                        <div className={`flex-1 flex flex-col items-center justify-center ${isDarkMode ? 'bg-black text-white' : 'bg-gray-50 text-gray-700'}`}>
+                    {/* --- Consolidated Initial Loading Indicator --- */}
+                    {isInitialLoading ? (
+                        <div className="flex-1 flex flex-col items-center justify-center p-20">
                             <div className={`animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 ${isDarkMode ? 'border-blue-500' : 'border-blue-600'}`}></div>
                             <span className="mt-4 text-sm">
-                                {loading.gpt ? 'Loading assistant...' : 'Loading conversation...'}
+                                Loading assistant... 
                             </span>
                         </div>
                     ) : messages.length === 0 ? (
-                        <div className="flex-1 flex flex-col items-center justify-center text-center px-2 pt-8 pb-16">
+                        // Welcome Screen (Rendered only after initial load is complete and if no messages)
+                        <div className="welcome-screen py-10">
                             {gptId && gptData ? (
-                                <>
-                                    <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
+                                // GPT-specific welcome
+                                <div className="text-center">
+                                    <div className={`w-16 h-16 rounded-full mx-auto flex items-center justify-center mb-4 ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
                                         {gptData.imageUrl ? (
                                             <img src={gptData.imageUrl} alt={gptData.name} className="w-full h-full object-cover rounded-full" />
                                         ) : (
@@ -877,53 +829,55 @@ const UserChat = () => {
                                         )}
                                     </div>
                                     <h2 className={`text-xl font-semibold mb-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{gptData.name}</h2>
-                                    <p className={`max-w-md ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{gptData.description || 'Start a conversation...'}</p>
+                                    <p className={`max-w-md mx-auto ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{gptData.description || 'Start a conversation...'}</p>
                                     
+                                    {/* Conversation starter */}
                                     {gptData.conversationStarter && (
                                         <div 
                                             onClick={() => handleChatSubmit(gptData.conversationStarter)}
-                                            className={`mt-5 max-w-xs p-3 border rounded-lg text-left cursor-pointer transition-colors ${
+                                            className={`mt-5 max-w-xs mx-auto p-3 border rounded-lg text-left cursor-pointer transition-colors ${
                                                 isDarkMode 
                                                     ? 'bg-gray-800/70 border-gray-700/70 hover:bg-gray-800 hover:border-gray-600/70 text-white' 
                                                     : 'bg-gray-200 border-gray-300 hover:bg-gray-300 hover:border-gray-400 text-gray-800'
                                             }`}
                                         >
-                                            <p className="text-sm line-clamp-3">
-                                                {gptData.conversationStarter}
-                                            </p>
+                                            <p className="text-sm line-clamp-3">{gptData.conversationStarter}</p>
                                         </div>
                                     )}
-                                </>
+                                </div>
                             ) : (
-                                <>
-                                    <h1 className={`text-2xl sm:text-3xl md:text-4xl font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>AI Agent</h1>
-                                    <span className={`text-base sm:text-lg md:text-xl font-medium mb-8 block ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>How can I assist you today?</span>
+                                // Generic welcome
+                                <div className="text-center">
+                                    <h1 className={`text-2xl sm:text-3xl md:text-4xl font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>AI Assistant</h1>
+                                    <p className={`text-base sm:text-lg md:text-xl font-medium mb-8 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>How can I assist you today?</p>
                                     
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-6 w-full max-w-xs sm:max-w-2xl lg:max-w-3xl xl:max-w-3xl">
+                                    {/* Simplified prompts display */}
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl mx-auto">
                                         {predefinedPrompts.map((item) => (
-                                            <motion.div
+                                            <div
                                                 key={item.id}
-                                                className={`group relative backdrop-blur-xl border rounded-xl p-3 cursor-pointer transition-all duration-150 text-left ${
-                                                    isDarkMode 
-                                                        ? 'bg-white/[0.05] border-white/20 hover:bg-white/[0.08] shadow-[0_0_15px_rgba(204,43,94,0.2)] hover:shadow-[0_0_20px_rgba(204,43,94,0.4)]' 
-                                                        : 'bg-white border-gray-200 hover:bg-gray-50 shadow-md hover:shadow-lg'
-                                                }`}
-                                                whileHover={{ scale: 1.03, y: -2, transition: { duration: 0.15 } }}
-                                                whileTap={{ scale: 0.98 }}
                                                 onClick={() => handlePromptClick(item)}
+                                                className={`p-3 border rounded-lg cursor-pointer text-left ${
+                                                    isDarkMode 
+                                                        ? 'bg-gray-800 border-gray-700 hover:bg-gray-700' 
+                                                        : 'bg-white border-gray-200 hover:bg-gray-50'
+                                                }`}
                                             >
-                                                <div className="relative z-10">
-                                                    <h3 className={`font-medium text-sm sm:text-base mb-1 ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>{item.title}</h3>
-                                                    <p className={`text-xs sm:text-sm line-clamp-2 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>{item.prompt}</p>
+                                                <h3 className={`font-medium mb-1 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>{item.title}</h3>
+                                                <p className={`text-xs line-clamp-2 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>{item.prompt}</p>
                                                 </div>
-                                            </motion.div>
                                         ))}
                                     </div>
-                                </>
+                                </div>
                             )}
                         </div>
                     ) : (
-                        messages.map((msg, index) => (
+                        // Message list (Rendered only after initial load and when messages exist)
+                        <>
+                            {messages.length > 0 && (
+                                messages
+                                    .filter(msg => msg.role !== 'system') 
+                                    .map((msg) => (
                             <motion.div 
                                 key={msg.id}
                                 initial={{ opacity: 0, y: 10 }}
@@ -931,6 +885,7 @@ const UserChat = () => {
                                 transition={{ duration: 0.3 }}
                                 className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} items-end space-x-2`}
                             >
+                                            {/* Assistant Icon - Render if it's an assistant message */}
                                 {msg.role === 'assistant' && (
                                     <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${isDarkMode ? 'bg-gray-700' : 'bg-gray-300'}`}>
                                         {gptData?.imageUrl ? (
@@ -940,6 +895,8 @@ const UserChat = () => {
                                         )}
                                     </div>
                                 )}
+                                            
+                                            {/* Message Bubble */}
                                 <div 
                                     className={`max-w-[95%] sm:max-w-[85%] md:max-w-[80%] p-3 rounded-lg ${
                                         msg.role === 'user' 
@@ -949,53 +906,20 @@ const UserChat = () => {
                                                 : (isDarkMode ? 'bg-gray-700 text-gray-100' : 'bg-gray-200 text-gray-800'))
                                     }`}
                                 >
-                                    <ReactMarkdown 
-                                        remarkPlugins={[remarkGfm]}
-                                        components={{
-                                            h1: ({node, ...props}) => <h1 className="text-xl font-bold my-3" {...props} />,
-                                            h2: ({node, ...props}) => <h2 className="text-lg font-bold my-2" {...props} />,
-                                            h3: ({node, ...props}) => <h3 className="text-md font-bold my-2" {...props} />,
-                                            h4: ({node, ...props}) => <h4 className="font-bold my-2" {...props} />,
-                                            p: ({node, children}) => <p className="mb-2 last:mb-0">{children}</p>,
-                                            ul: ({node, ...props}) => <ul className="list-disc pl-5 my-2" {...props} />,
-                                            ol: ({node, ...props}) => <ol className="list-decimal pl-5 my-2" {...props} />,
-                                            li: ({node, index, ...props}) => <li key={index} className="my-1" {...props} />,
-                                            a: ({node, ...props}) => <a className="text-blue-400 hover:underline" {...props} />,
-                                            blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-gray-500 dark:border-gray-400 pl-4 my-3 italic" {...props} />,
-                                            code({node, inline, className, children, ...props}) {
-                                                const match = /language-(\w+)/.exec(className || '');
-                                                return !inline ? (
-                                                    <pre className={`p-2 rounded overflow-x-auto my-2 text-sm ${isDarkMode ? 'bg-black/30' : 'bg-gray-100'} ${className}`} {...props}>
-                                                        <code>{children}</code>
-                                                    </pre>
-                                                ) : (
-                                                    <code className={`px-1 rounded ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'} ${className}`} {...props}>
-                                                        {children}
-                                                    </code>
-                                                );
-                                            },
-                                            table: ({node, ...props}) => (
-                                                <div className="overflow-x-auto my-3">
-                                                    <table className="min-w-full border border-gray-400 dark:border-gray-500" {...props} />
-                                                </div>
-                                            ),
-                                            thead: ({node, ...props}) => <thead className="bg-gray-300 dark:bg-gray-600" {...props} />,
-                                            tbody: ({node, ...props}) => <tbody className="divide-y divide-gray-400 dark:divide-gray-500" {...props} />,
-                                            tr: ({node, ...props}) => <tr className="hover:bg-gray-300 dark:hover:bg-gray-600" {...props} />,
-                                            th: ({node, ...props}) => <th className="px-4 py-2 text-left font-medium" {...props} />,
-                                            td: ({node, ...props}) => <td className="px-4 py-2" {...props} />,
-                                        }}
-                                    >
+                                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                         {msg.content}
                                     </ReactMarkdown>
+                                                
                                     {msg.isStreaming && (
                                         <div className="flex space-x-1 mt-1">
-                                            <motion.div animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }} transition={{ duration: 1, repeat: Infinity, repeatDelay: 0.5, ease: "easeInOut" }} className={`w-2 h-2 rounded-full ${isDarkMode ? 'bg-gray-400' : 'bg-gray-500'}`}></motion.div>
-                                            <motion.div animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }} transition={{ duration: 1, repeat: Infinity, delay: 0.2, repeatDelay: 0.5, ease: "easeInOut" }} className={`w-2 h-2 rounded-full ${isDarkMode ? 'bg-gray-400' : 'bg-gray-500'}`}></motion.div>
-                                            <motion.div animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }} transition={{ duration: 1, repeat: Infinity, delay: 0.4, repeatDelay: 0.5, ease: "easeInOut" }} className={`w-2 h-2 rounded-full ${isDarkMode ? 'bg-gray-400' : 'bg-gray-500'}`}></motion.div>
+                                                        <motion.div animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }} transition={{ duration: 1, repeat: Infinity, repeatDelay: 0.5 }} className={`w-2 h-2 rounded-full ${isDarkMode ? 'bg-gray-400' : 'bg-gray-500'}`}></motion.div>
+                                                        <motion.div animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }} transition={{ duration: 1, repeat: Infinity, delay: 0.2, repeatDelay: 0.5 }} className={`w-2 h-2 rounded-full ${isDarkMode ? 'bg-gray-400' : 'bg-gray-500'}`}></motion.div>
+                                                        <motion.div animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }} transition={{ duration: 1, repeat: Infinity, delay: 0.4, repeatDelay: 0.5 }} className={`w-2 h-2 rounded-full ${isDarkMode ? 'bg-gray-400' : 'bg-gray-500'}`}></motion.div>
                                         </div>
                                     )}
                                 </div>
+                                            
+                                            {/* User Icon - Render if it's a user message */}
                                 {msg.role === 'user' && (
                                     <div className={`flex-shrink-0 w-8 h-8 rounded-full overflow-hidden border ${isDarkMode ? 'border-white/20 bg-gray-700' : 'border-gray-300 bg-gray-300'}`}>
                                        {userData?.profilePic ? (
@@ -1010,24 +934,25 @@ const UserChat = () => {
                             </motion.div>
                         ))
                     )}
-                    {loading.message && !messages.some(msg => msg.isStreaming) && (
+                        </>
+                    )}
+                    
+                    {/* Loading indicator for NEW messages (when submitting) */}
+                    {!isInitialLoading && loading.message && !messages.some(msg => msg.isStreaming) && (
                         <div className="flex justify-start items-end space-x-2">
                             <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${isDarkMode ? 'bg-gray-700' : 'bg-gray-300'}`}>
-                                {gptData?.imageUrl ? (
-                                    <img src={gptData.imageUrl} alt="GPT" className="w-full h-full rounded-full object-cover" />
-                                ) : (
                                     <IoSparkles size={16} className={isDarkMode ? 'text-blue-400' : 'text-blue-600'} />
-                                )}
                             </div>
                             <div className={`p-3 rounded-lg ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
                                 <div className="flex space-x-1">
-                                    <motion.div animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }} transition={{ duration: 1, repeat: Infinity, repeatDelay: 0.5, ease: "easeInOut" }} className={`w-2 h-2 rounded-full ${isDarkMode ? 'bg-gray-400' : 'bg-gray-500'}`}></motion.div>
-                                    <motion.div animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }} transition={{ duration: 1, repeat: Infinity, delay: 0.2, repeatDelay: 0.5, ease: "easeInOut" }} className={`w-2 h-2 rounded-full ${isDarkMode ? 'bg-gray-400' : 'bg-gray-500'}`}></motion.div>
-                                    <motion.div animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }} transition={{ duration: 1, repeat: Infinity, delay: 0.4, repeatDelay: 0.5, ease: "easeInOut" }} className={`w-2 h-2 rounded-full ${isDarkMode ? 'bg-gray-400' : 'bg-gray-500'}`}></motion.div>
+                                    <motion.div animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }} transition={{ duration: 1, repeat: Infinity, repeatDelay: 0.5 }} className={`w-2 h-2 rounded-full ${isDarkMode ? 'bg-gray-400' : 'bg-gray-500'}`}></motion.div>
+                                    <motion.div animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }} transition={{ duration: 1, repeat: Infinity, delay: 0.2, repeatDelay: 0.5 }} className={`w-2 h-2 rounded-full ${isDarkMode ? 'bg-gray-400' : 'bg-gray-500'}`}></motion.div>
+                                    <motion.div animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }} transition={{ duration: 1, repeat: Infinity, delay: 0.4, repeatDelay: 0.5 }} className={`w-2 h-2 rounded-full ${isDarkMode ? 'bg-gray-400' : 'bg-gray-500'}`}></motion.div>
                                 </div>
                             </div>
                         </div>
                     )}
+                    
                     <div ref={messagesEndRef} /> 
                 </div>
             </div>

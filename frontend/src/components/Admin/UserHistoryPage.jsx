@@ -240,8 +240,10 @@ const UserHistoryPage = () => {
 
     // Handle chat history item click to navigate to conversation
     const handleConversationClick = (conversation) => {
-        if (conversation && conversation.gptId) {
-            navigate(`/admin/chat/${conversation.gptId}?loadHistory=true&conversationId=${conversation._id}`);
+        if (conversation && conversation.gptId && conversation._id) {
+            navigate(`/admin/chat/${conversation.gptId}?conversationId=${conversation._id}`);
+        } else {
+            console.error("Missing gptId or conversation._id, cannot navigate", conversation);
         }
     };
 

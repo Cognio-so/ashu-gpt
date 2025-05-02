@@ -107,6 +107,9 @@ const AdminChat = () => {
     const [conversationMemory, setConversationMemory] = useState([]);
     const [hasNotifiedGptOpened, setHasNotifiedGptOpened] = useState(false);
     const [conversationId, setConversationId] = useState(null);
+    const [isInitialLoading, setIsInitialLoading] = useState(false);
+    const [currentConversationId, setCurrentConversationId] = useState(null);
+    const [loading, setLoading] = useState({ message: false });
     
     // Use effect to handle user data changes
     useEffect(() => {
@@ -169,62 +172,130 @@ const AdminChat = () => {
         }
     };
     
-    // Fetch GPT data if gptId is provided
+    // Get conversationId from URL query params
     useEffect(() => {
-        // Add check for userData to ensure user is authenticated before fetching
-        if (gptId && userData) { 
-            const fetchGptData = async () => {
-                try {
-                    setIsFetchingGpt(true);
-                    const token = localStorage.getItem('authToken'); // or however you store your token
-                    
-                    const response = await axiosInstance.get(`/api/custom-gpts/${gptId}`, {
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Content-Type': 'application/json'
-                        },
-                        withCredentials: true
-                    });
-                    
-                    if (response.data.success) {
-                        const fetchedGptData = response.data.customGpt;
-                        setGptData(fetchedGptData);
-                        setMessages([]);
-                        
-                        // Notify backend when GPT is opened
-                        notifyGptOpened(fetchedGptData, userData);
-                    } else {
-                        console.error("Failed to load GPT data, success false");
-                        navigate(-1);
-                    }
-                } catch (err) {
-                    console.error("Error fetching GPT data:", err);
-                    if (err.response?.status === 401) {
-                        // Handle unauthorized error - maybe redirect to login
-                        navigate('/login');
-                    } else {
-                        navigate(-1);
-                    }
-                } finally {
-                    setIsFetchingGpt(false);
+        const params = new URLSearchParams(location.search);
+        const convId = params.get('conversationId');
+        setCurrentConversationId(convId);
+    }, [location.search]);
+
+    // Refactor the main useEffect hook for fetching data
+    useEffect(() => {
+        // Guard Clauses
+        if (!gptId) {
+            setGptData(null); setMessages([]); setConversationMemory([]); setIsInitialLoading(false);
+            return;
+        }
+        if (authLoading) {
+            console.log("AdminChat: Auth loading..."); setIsInitialLoading(true);
+            return;
+        }
+        if (!authLoading && !user) {
+            console.warn("AdminChat: Auth finished, no user."); setIsInitialLoading(false);
+            setGptData({ _id: gptId, name: "Admin Chat", description: "Admin user required.", model: "gpt-4o-mini" });
+            setMessages([]); setConversationMemory([]);
+            return;
+        }
+        if (user.role !== 'admin') {
+             console.warn("AdminChat: Non-admin user trying to access."); setIsInitialLoading(false);
+             navigate('/user/collections'); // Redirect non-admins
+             return;
+        }
+
+        // Conditions met (gptId, admin user loaded)
+        console.log("AdminChat: Conditions met. Starting fetch.");
+        setIsInitialLoading(true);
+
+        const fetchAdminChatData = async () => {
+            let fetchedGptData = null;
+            let conversationMessages = [];
+            let conversationMemorySlice = [];
+
+            try {
+                // --- Step 1: Fetch GPT Data ---
+                console.log("[AdminChat] Fetching GPT data:", gptId);
+                const gptResponse = await axiosInstance.get(`/api/custom-gpts/${gptId}`, { withCredentials: true }); // Use admin route for GPTs if different
+
+                if (gptResponse.data?.success && gptResponse.data.customGpt) {
+                    fetchedGptData = gptResponse.data.customGpt;
+                    console.log("[AdminChat] GPT data fetched:", fetchedGptData.name);
+                    setGptData(fetchedGptData); // Set GPT data immediately
+                     // Setup collection name, notify opened (if needed for admin view)
+                    const sanitizedEmail = (user.email || 'admin').replace(/[^a-zA-Z0-9]/g, '_');
+                    const sanitizedGptName = (fetchedGptData.name || 'gpt').replace(/[^a-zA-Z0-9]/g, '_');
+                    setCollectionName(`kb_${sanitizedEmail}_${sanitizedGptName}_${gptId}`); // Consider if admin needs own collection context
+                    // Maybe skip notifyGptOpened for admin view unless specifically required
+                    // notifyGptOpened(fetchedGptData, user).catch(err => console.warn("[AdminChat] Notify error:", err));
+
+                } else {
+                    console.warn("[AdminChat] Failed GPT fetch:", gptResponse.data);
+                    fetchedGptData = { _id: gptId, name: "Assistant", description: "Details unavailable.", model: "gpt-4o-mini" };
+                    setGptData(fetchedGptData);
                 }
-            };
-            
-            fetchGptData();
-        } else if (!gptId) { // Handle case where gptId is removed or absent
-            setGptData(null);
-            setMessages([]);
-        }
-        // Ensure userData is in the dependency array so the effect reruns when user logs in/out
-    }, [gptId, navigate, userData]);
-    
-    // Update the useEffect that calls notifyGptOpened
-    useEffect(() => {
-        if (gptData && userData && !hasNotifiedGptOpened) {
-            notifyGptOpened(gptData, userData);
-        }
-    }, [gptData, userData, hasNotifiedGptOpened]);
-    
+
+                // --- Step 2: Fetch Specific Conversation if ID exists ---
+                if (currentConversationId) {
+                    console.log("[AdminChat] Loading specific conversation:", currentConversationId);
+                    // Use the NEW admin route
+                    const historyResponse = await axiosInstance.get(`/api/chat-history/admin/conversation/${currentConversationId}`, { withCredentials: true }); 
+
+                    if (historyResponse.data?.success && historyResponse.data.conversation?.messages?.length > 0) {
+                        const { conversation } = historyResponse.data;
+                        // Format messages
+                        conversationMessages = conversation.messages.map((msg, index) => ({
+                            id: `${conversation._id}-${index}-${msg.timestamp || Date.now()}`, // Unique ID
+                            role: msg.role,
+                            content: msg.content,
+                            timestamp: new Date(msg.timestamp || conversation.createdAt)
+                        }));
+                        // Set memory slice
+                        conversationMemorySlice = conversation.messages.slice(-10).map(msg => ({
+                            role: msg.role,
+                            content: msg.content,
+                            timestamp: msg.timestamp || conversation.createdAt
+                        }));
+                        console.log(`[AdminChat] Loaded ${conversationMessages.length} messages from conversation ${currentConversationId}.`);
+                    } else {
+                        console.log("[AdminChat] Specific conversation not found or empty.");
+                        conversationMessages = [{ // Add a system message indicating issue
+                           id: Date.now(), role: 'system', content: `Could not load conversation ${currentConversationId}. It might be empty or not found.`, timestamp: new Date() 
+                        }];
+                        conversationMemorySlice = [];
+                    }
+                } else {
+                    // No specific conversation ID, start fresh
+                    conversationMessages = [];
+                    conversationMemorySlice = [];
+                }
+
+                // --- Step 3: Set Messages & Memory State ---
+                setMessages(conversationMessages);
+                setConversationMemory(conversationMemorySlice);
+                console.log("[AdminChat] Messages and memory state updated.");
+
+            } catch (err) {
+                console.error("[AdminChat] Error during fetch:", err);
+                setGptData(gptData || { _id: gptId, name: "Assistant", description: "Error loading data.", model: "gpt-4o-mini" }); // Keep existing GPT data if fetch failed partially
+                setMessages([{ id: Date.now(), role: 'system', content: `Error loading chat data: ${err.message}`, timestamp: new Date() }]);
+                setConversationMemory([]);
+            } finally {
+                // --- Step 4: Mark initial loading complete ---
+                console.log("[AdminChat] Process complete. Setting isInitialLoading to false.");
+                setIsInitialLoading(false);
+            }
+        };
+
+        fetchAdminChatData(); // Execute fetch
+
+        // Cleanup
+        return () => {
+            console.log("useEffect cleanup: Resetting loading states.");
+            setIsInitialLoading(false);
+            setLoading(prev => ({ ...prev, message: false }));
+        };
+
+    }, [gptId, user, authLoading, currentConversationId]); // REMOVE location.state and location.search
+
     const predefinedPrompts = [
         {
             id: 1,
@@ -324,7 +395,7 @@ const AdminChat = () => {
             });
             setConversationMemory(updatedMemory);
             
-            setIsLoading(true);
+            setLoading(prev => ({ ...prev, message: true }));
             setHasInteracted(true);
             
             // Create request payload with enhanced memory
@@ -336,24 +407,33 @@ const AdminChat = () => {
             
             const payload = {
                 message,
-                // FIX: Send gptId instead of constructed collectionName
-                gpt_id: gptId, 
-                // FIX: Add user_email (using admin user's email)
-                user_email: user?.email || 'unknown_admin', 
-                // FIX: Add gpt_name
-                gpt_name: gptData?.name || 'unknown_gpt', 
+                gpt_id: gptId,
+                user_email: user?.email || 'unknown_admin',
+                gpt_name: gptData?.name || 'unknown_gpt',
                 user_documents: userDocuments,
-                // model: gptData?.model, // Model is determined backend-side based on collection/gpt_id now
+                model: gptData?.model || 'gpt-4o-mini',
                 memory: updatedMemory,
                 history: messages.slice(-6).map(msg => ({
                     role: msg.role,
                     content: msg.content
                 })),
-                // Use the actual hybridSearch setting
                 use_hybrid_search: useHybridSearch
             };
 
-            // Add check for gptId before making the call
+            // Make sure we always have all required fields
+            if (!payload.user_email) {
+                payload.user_email = user?.email || 'admin@system.com';
+            }
+            if (!payload.gpt_name) {
+                payload.gpt_name = gptData?.name || 'Admin Chat';
+            }
+            if (!payload.gpt_id && gptData?._id) {
+                payload.gpt_id = gptData._id;
+            } else if (!payload.gpt_id && gptId) {
+                payload.gpt_id = gptId;
+            }
+
+            // Now do the check
             if (!payload.gpt_id) {
                 throw new Error("GPT ID is missing, cannot send message.");
             }
@@ -444,7 +524,7 @@ const AdminChat = () => {
             
             setStreamingMessage(null); // Clear any partial streaming message
         } finally {
-            setIsLoading(false);
+            setLoading(prev => ({ ...prev, message: false }));
         }
     };
     
@@ -698,6 +778,9 @@ const AdminChat = () => {
             
             // Save error message to history
             await saveMessageToHistory(errorContent, 'assistant');
+        } finally {
+            console.log(`[Stream ${streamingMessage?.id}] Cleaning up. Setting loading to false.`);
+            setLoading(prev => ({ ...prev, message: false }));
         }
     };
 
@@ -788,7 +871,11 @@ const AdminChat = () => {
             
                 <div className="flex-1 overflow-y-auto p-4 flex flex-col bg-white dark:bg-black hide-scrollbar">
                 <div className="w-full max-w-3xl mx-auto flex-1 flex flex-col space-y-4 pb-4">
-                    {isFetchingGpt ? (
+                    {isInitialLoading ? (
+                        <div className="flex-1 flex flex-col items-center justify-center p-20">
+                           <span className="mt-4 text-sm">Loading chat...</span>
+                        </div>
+                    ) : isFetchingGpt ? (
                         <div className="flex-1 flex items-center justify-center">
                             <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 dark:border-blue-400"></div>
                         </div>
@@ -989,17 +1076,10 @@ const AdminChat = () => {
                                 </div>
                             )}
                             
-                            {/* Better loading animation - modified condition */}
-                            {isLoading && !streamingMessage && messages.length > 0 && (
-                                <div className="flex justify-start">
-                                    <div className="max-w-[95%] w-full rounded-2xl px-5 py-4 assistant-message text-black dark:text-white rounded-bl-none flex items-center">
-                                        <div className="typing-animation flex">
-                                            <span></span>
-                                            <span></span>
-                                            <span></span>
-                                        </div>
-                                        <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">Searching knowledge base...</span>
-                                    </div>
+                            {/* Loading indicator for NEW messages (when submitting) */}
+                            {!isInitialLoading && loading.message && !messages.some(msg => msg.isStreaming) && ( 
+                                <div className="flex justify-start items-end space-x-2">
+                                   {/* ... loading dots ... */}
                                 </div>
                             )}
                             <div ref={messagesEndRef} />

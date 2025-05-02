@@ -1,17 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { IoSave, IoMoon, IoSunny, IoShieldCheckmark, IoNotificationsOutline, IoPersonOutline, IoKey, IoWarning, IoEyeOutline, IoEyeOffOutline, IoChevronDown, IoCheckmarkCircle } from 'react-icons/io5';
+import { IoSave, IoMoon, IoSunny, IoPersonOutline, IoKey, IoWarning, IoEyeOutline, IoEyeOffOutline, IoCheckmarkCircle } from 'react-icons/io5';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-
-const API_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+import { useNavigate } from 'react-router-dom';
+import { axiosInstance } from '../../api/axiosInstance';
 
 const SettingsPage = () => {
     const { user, loading: authLoading } = useAuth();
     const { isDarkMode, toggleTheme } = useTheme();
+    const navigate = useNavigate();
     
     const [activeTab, setActiveTab] = useState('general');
     const [isLoading, setIsLoading] = useState(false);
+    const [apiKeysLoading, setApiKeysLoading] = useState(false);
+    const [passwordLoading, setPasswordLoading] = useState(false);
     
     // State to manage visibility of API keys
     const [showKeys, setShowKeys] = useState({
@@ -29,20 +32,49 @@ const SettingsPage = () => {
         llama: '',
     });
     
-    // Add back the general settings state
-    const [generalSettings, setGeneralSettings] = useState({
-        emailNotifications: true,
-        desktopNotifications: false,
+    // Password change state
+    const [passwordData, setPasswordData] = useState({
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: ''
     });
     
-    // Load settings from localStorage on mount
+    // Load API keys from the backend on mount
     useEffect(() => {
-        const savedKeys = JSON.parse(localStorage.getItem('apiKeys') || '{}');
-        setApiKeys(prev => ({ ...prev, ...savedKeys }));
+        const fetchApiKeys = async () => {
+            if (!user) return;
+            
+            try {
+                setApiKeysLoading(true);
+                const response = await axiosInstance.get('/api/auth/user/api-keys', {
+                    withCredentials: true
+                });
+                
+                if (response.data && response.data.success) {
+                    // Convert the server response to our format
+                    const keys = response.data.apiKeys || {};
+                    setApiKeys({
+                        openai: keys.openai || '',
+                        claude: keys.claude || '',
+                        gemini: keys.gemini || '',
+                        llama: keys.llama || ''
+                    });
+                } else {
+                    // If the server doesn't have API keys stored yet, try to load from localStorage for backward compatibility
+                    const savedKeys = JSON.parse(localStorage.getItem('apiKeys') || '{}');
+                    setApiKeys(prev => ({ ...prev, ...savedKeys }));
+                }
+            } catch (error) {
+                // Fallback to localStorage if server fetch fails
+                const savedKeys = JSON.parse(localStorage.getItem('apiKeys') || '{}');
+                setApiKeys(prev => ({ ...prev, ...savedKeys }));
+            } finally {
+                setApiKeysLoading(false);
+            }
+        };
 
-        const savedGeneralSettings = JSON.parse(localStorage.getItem('generalSettings') || '{}');
-        setGeneralSettings(prev => ({ ...prev, ...savedGeneralSettings }));
-    }, []);
+        fetchApiKeys();
+    }, [user]);
     
     const toggleKeyVisibility = (keyName) => {
         setShowKeys(prev => ({ ...prev, [keyName]: !prev[keyName] }));
@@ -55,33 +87,100 @@ const SettingsPage = () => {
     
     const saveApiKeys = async () => {
         try {
-            setIsLoading(true);
-            localStorage.setItem('apiKeys', JSON.stringify(apiKeys));
-            toast.success("API keys updated successfully");
+            setApiKeysLoading(true);
+            
+            // First, try to refresh the token before making the API call
+            try {
+                await axiosInstance.post('/api/auth/refresh');
+            } catch (refreshError) {
+                // Token refresh failed, continuing anyway
+            }
+            
+            // Now make the API call with the refreshed token
+            const response = await axiosInstance.post('/api/auth/user/api-keys', { apiKeys });
+            
+            if (response.data && response.data.success) {
+                localStorage.setItem('apiKeys', JSON.stringify(apiKeys));
+                toast.success("API keys updated successfully");
+            } else {
+                throw new Error(response.data?.message || "Failed to save API keys");
+            }
         } catch (error) {
-            console.error("Error saving API keys:", error);
-            toast.error("Failed to save API keys");
+            toast.error(error.response?.data?.message || "Failed to save API keys");
+            
+            // Still try to save to localStorage as fallback
+            try {
+                localStorage.setItem('apiKeys', JSON.stringify(apiKeys));
+                toast.info("API keys saved locally (offline mode)");
+            } catch (localError) {
+                // Error saving to localStorage
+            }
         } finally {
-            setIsLoading(false);
+            setApiKeysLoading(false);
         }
     };
-    
-    const handleGeneralSettingChange = (setting) => {
-        setGeneralSettings(prev => ({
+
+    const handlePasswordChange = (e) => {
+        const { name, value } = e.target;
+        setPasswordData(prev => ({
             ...prev,
-            [setting]: !prev[setting]
+            [name]: value
         }));
     };
 
-    const saveGeneralSettings = () => {
+    const updatePassword = async () => {
+        // Password validation
+        if (!passwordData.currentPassword) {
+            toast.error("Current password is required");
+            return;
+        }
+        
+        if (!passwordData.newPassword) {
+            toast.error("New password is required");
+            return;
+        }
+        
+        if (passwordData.newPassword !== passwordData.confirmPassword) {
+            toast.error("New passwords don't match");
+            return;
+        }
+        
         try {
-            localStorage.setItem('generalSettings', JSON.stringify(generalSettings));
-            toast.success("Preferences saved successfully");
+            setPasswordLoading(true);
+            
+            // Make API call to update the password
+            const response = await axiosInstance.post('/api/auth/update-password', {
+                currentPassword: passwordData.currentPassword,
+                newPassword: passwordData.newPassword
+            });
+            
+            if (response.data && response.data.success) {
+                toast.success("Password updated successfully");
+                setPasswordData({
+                    currentPassword: '',
+                    newPassword: '',
+                    confirmPassword: ''
+                });
+            } else {
+                throw new Error(response.data?.message || "Failed to update password");
+            }
         } catch (error) {
-            console.error("Error saving preferences:", error);
-            toast.error("Failed to save preferences");
+            toast.error(error.response?.data?.message || "Failed to update password");
+        } finally {
+            setPasswordLoading(false);
         }
     };
+
+    // CSS for hiding scrollbars
+    const scrollbarHideStyles = `
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
+        }
+    `;
 
     // Helper function to render API key input field
     const renderApiKeyInput = (modelName, placeholder) => (
@@ -121,6 +220,9 @@ const SettingsPage = () => {
 
     return (
         <div className="flex flex-col h-full bg-white dark:bg-black text-black dark:text-white overflow-hidden">
+            {/* Add the scrollbar-hiding styles */}
+            <style>{scrollbarHideStyles}</style>
+            
             {/* Top panel */}
             <div className="px-6 pt-6 pb-4 border-b border-gray-200 dark:border-gray-800 flex-shrink-0 text-center sm:text-left">
                 <h1 className="text-xl font-bold text-gray-900 dark:text-white">Settings</h1>
@@ -129,12 +231,10 @@ const SettingsPage = () => {
             
             {/* Tab Navigation */}
             <div className="px-6 pt-4 flex-shrink-0">
-                <div className="flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-gray-800 pb-px">
+                <div className="flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-gray-800 pb-px hide-scrollbar">
                     {[
                         { id: 'general', label: 'General', icon: IoPersonOutline },
                         { id: 'api-keys', label: 'API Keys', icon: IoKey },
-                        { id: 'notifications', label: 'Notifications', icon: IoNotificationsOutline },
-                        { id: 'security', label: 'Security', icon: IoShieldCheckmark },
                     ].map(tab => (
                          <button 
                             key={tab.id}
@@ -152,12 +252,12 @@ const SettingsPage = () => {
                 </div>
             </div>
             
-            {/* Content Area */}
-            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-gray-50 dark:bg-gray-900/50">
+            {/* Content Area - Added hide-scrollbar class */}
+            <div className="flex-1 overflow-y-auto p-6 hide-scrollbar bg-gray-50 dark:bg-gray-900/50">
                 {activeTab === 'general' && (
                     <div className="space-y-8 max-w-3xl mx-auto">
                         {/* Account Details Card */}
-                        <div className="bg-white dark:bg-gray-800 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
+                        <div className="bg-white dark:bg-gray-800 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 shadow-sm">
                             <div className="p-6">
                                 <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-6">Account Details</h3>
                                 {authLoading ? (
@@ -189,7 +289,7 @@ const SettingsPage = () => {
                         </div>
                         
                         {/* Appearance Card */}
-                        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+                        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6 shadow-sm">
                             <div className="flex items-center justify-between mb-6">
                                 <div>
                                     <h3 className="text-xl font-semibold text-gray-900 dark:text-white">Appearance</h3>
@@ -247,158 +347,99 @@ const SettingsPage = () => {
                                 </button>
                             </div>
                         </div>
-                    </div>
-                )}
-                
-                {activeTab === 'api-keys' && (
-                    <div className="space-y-8 max-w-3xl mx-auto">
-                        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
-                            <div className="mb-6">
-                                <h3 className="text-xl font-semibold text-gray-900 dark:text-white">Model API Keys</h3>
-                                <p className="text-gray-500 dark:text-gray-400 mt-1">Connect your AI models with API keys</p>
-                            </div>
-                            
-                            <div className="grid gap-4 md:grid-cols-2">
-                                {renderApiKeyInput('openai', 'sk-...')}
-                                {renderApiKeyInput('claude', 'sk-ant-...')}
-                                {renderApiKeyInput('gemini', 'AIza...')}
-                                {renderApiKeyInput('llama', 'meta-llama-...')}
-                            </div>
-                            
-                            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-500/30 rounded-lg p-4 flex items-start gap-3 mt-6">
-                                <IoWarning className="text-amber-500 dark:text-amber-400 flex-shrink-0 mt-0.5" size={20} />
-                                <p className="text-sm text-amber-700 dark:text-amber-200/80">
-                                    API keys are stored locally in your browser. For better security in production, server-side storage is recommended.
-                                </p>
-                            </div>
-                            
-                            <div className="mt-6 flex justify-end">
-                                <button
-                                    onClick={saveApiKeys}
-                                    disabled={isLoading}
-                                    className={`flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 rounded-lg text-white font-medium transition-all disabled:opacity-70 disabled:cursor-not-allowed`}
-                                >
-                                    {isLoading ? (
-                                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                    ) : (
-                                        <IoSave size={18} />
-                                    )}
-                                    <span>{isLoading ? 'Saving...' : 'Save API Keys'}</span>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
-                
-                {activeTab === 'notifications' && (
-                    <div className="space-y-8 max-w-3xl mx-auto">
-                        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
-                            <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-6">Notification Settings</h3>
-                            
-                            <div className="space-y-5">
-                                <div className="flex items-center justify-between p-4 bg-gray-100 dark:bg-gray-700 rounded-lg border border-gray-300 dark:border-gray-600 transition-all hover:border-blue-500/30">
-                                    <div>
-                                        <p className="font-medium text-gray-800 dark:text-white">Email Notifications</p>
-                                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Receive updates and alerts via email</p>
-                                    </div>
-                                    <label className="relative inline-flex items-center cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            className="sr-only peer"
-                                            checked={generalSettings.emailNotifications}
-                                            onChange={() => handleGeneralSettingChange('emailNotifications')}
-                                        />
-                                        <div className="w-11 h-6 bg-gray-300 dark:bg-gray-600 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:bg-blue-600 after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
-                                    </label>
-                                </div>
-                                
-                                <div className="flex items-center justify-between p-4 bg-gray-100 dark:bg-gray-700 rounded-lg border border-gray-300 dark:border-gray-600 transition-all hover:border-blue-500/30">
-                                    <div>
-                                        <p className="font-medium text-gray-800 dark:text-white">Desktop Notifications</p>
-                                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Show notifications on your desktop</p>
-                                    </div>
-                                    <label className="relative inline-flex items-center cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            className="sr-only peer"
-                                            checked={generalSettings.desktopNotifications}
-                                            onChange={() => handleGeneralSettingChange('desktopNotifications')}
-                                        />
-                                        <div className="w-11 h-6 bg-gray-300 dark:bg-gray-600 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:bg-blue-600 after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
-                                    </label>
-                                </div>
-                            </div>
-                            
-                            <div className="mt-6 flex justify-end">
-                                <button
-                                    onClick={saveGeneralSettings}
-                                    className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 rounded-lg text-white font-medium transition-all"
-                                >
-                                    <IoSave size={18} />
-                                    <span>Save Settings</span>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
-                
-                {activeTab === 'security' && (
-                    <div className="space-y-8 max-w-3xl mx-auto">
-                        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+                        
+                        {/* Password Change Section */}
+                        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6 shadow-sm">
                             <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-6">Change Password</h3>
                             <div className="space-y-4">
                                 <input
                                     type="password"
+                                    name="currentPassword"
+                                    value={passwordData.currentPassword}
+                                    onChange={handlePasswordChange}
                                     className="w-full bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 text-black dark:text-white focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 placeholder-gray-400 dark:placeholder-gray-500"
                                     placeholder="Current password"
                                     autoComplete="current-password"
                                 />
                                 <input
                                     type="password"
+                                    name="newPassword"
+                                    value={passwordData.newPassword}
+                                    onChange={handlePasswordChange}
                                     className="w-full bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 text-black dark:text-white focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 placeholder-gray-400 dark:placeholder-gray-500"
                                     placeholder="New password"
                                     autoComplete="new-password"
                                 />
                                 <input
                                     type="password"
+                                    name="confirmPassword"
+                                    value={passwordData.confirmPassword}
+                                    onChange={handlePasswordChange}
                                     className="w-full bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 text-black dark:text-white focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 placeholder-gray-400 dark:placeholder-gray-500"
                                     placeholder="Confirm new password"
                                     autoComplete="new-password"
                                 />
                                 <div className="pt-2 flex justify-end">
-                                    <button className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 rounded-lg text-white font-medium transition-all">
+                                    <button 
+                                        onClick={updatePassword}
+                                        disabled={passwordLoading}
+                                        className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 rounded-lg text-white font-medium transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+                                    >
+                                        {passwordLoading ? (
+                                            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                        ) : (
                                         <IoSave size={18} />
-                                        <span>Update Password</span>
+                                        )}
+                                        <span>{passwordLoading ? 'Updating...' : 'Update Password'}</span>
                                     </button>
                                 </div>
                             </div>
                         </div>
-                        
-                        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
-                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                                <div>
-                                    <h3 className="text-xl font-semibold text-gray-900 dark:text-white">Two-Factor Authentication</h3>
-                                    <p className="text-gray-500 dark:text-gray-400 mt-1">Add an extra layer of security</p>
-                                    <div className="mt-2 px-3 py-1 bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-full inline-flex items-center text-xs">
-                                        <span className="relative flex h-2 w-2 mr-2">
-                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                                            <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                                        </span>
-                                        Not Enabled
-                                    </div>
+                    </div>
+                )}
+                
+                {activeTab === 'api-keys' && (
+                    <div className="space-y-8 max-w-3xl mx-auto">
+                        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6 shadow-sm">
+                            <div className="mb-6">
+                                <h3 className="text-xl font-semibold text-gray-900 dark:text-white">Model API Keys</h3>
+                                <p className="text-gray-500 dark:text-gray-400 mt-1">Connect your AI models with API keys</p>
+                            </div>
+                            
+                            {apiKeysLoading && apiKeys.openai === '' && apiKeys.claude === '' && apiKeys.gemini === '' && apiKeys.llama === '' ? (
+                                <div className="py-8 flex justify-center">
+                                    <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                                 </div>
-                                <button className="bg-blue-100 dark:bg-blue-600/20 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-600/30 px-5 py-2.5 rounded-lg text-sm font-medium transition-colors">
-                                    Setup 2FA
+                            ) : (
+                            <div className="grid gap-4 md:grid-cols-2">
+                                {renderApiKeyInput('openai', 'sk-...')}
+                                {renderApiKeyInput('claude', 'sk-ant-...')}
+                                {renderApiKeyInput('gemini', 'AIza...')}
+                                {renderApiKeyInput('llama', 'meta-llama-...')}
+                            </div>
+                            )}
+                            
+                            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-300 dark:border-blue-500/30 rounded-lg p-4 flex items-start gap-3 mt-6">
+                                <IoCheckmarkCircle className="text-blue-500 dark:text-blue-400 flex-shrink-0 mt-0.5" size={20} />
+                                <p className="text-sm text-blue-700 dark:text-blue-200/80">
+                                    Your API keys are securely stored and encrypted in the database. They are never shared with third parties.
+                                </p>
+                            </div>
+                            
+                            <div className="mt-6 flex justify-end">
+                                <button
+                                    onClick={saveApiKeys}
+                                    disabled={apiKeysLoading}
+                                    className={`flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 rounded-lg text-white font-medium transition-all disabled:opacity-70 disabled:cursor-not-allowed`}
+                                >
+                                    {apiKeysLoading ? (
+                                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                    ) : (
+                                        <IoSave size={18} />
+                                    )}
+                                    <span>{apiKeysLoading ? 'Saving...' : 'Save API Keys'}</span>
                                 </button>
                             </div>
-                        </div>
-
-                        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
-                            <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Session Management</h3>
-                            <button className="w-full text-left px-5 py-4 bg-red-50 dark:bg-red-900/10 hover:bg-red-100 dark:hover:bg-red-900/20 border border-red-200 dark:border-red-500/20 rounded-lg text-red-600 dark:text-red-400 transition-colors font-medium">
-                                Log out from all other devices
-                            </button>
-                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">This will sign you out of all sessions except the current one.</p>
                         </div>
                     </div>
                 )}

@@ -82,12 +82,11 @@ const HistoryPage = () => {
             setFilteredActivities([]);
           }
         } 
-        // For team view - fetch all team chat history
+        // For team view - fetch all team chat history except current user's
         else if (viewType === 'team') {
           try {
-            // Check if user is an admin - using role property instead of isAdmin
+            // Check if user is an admin
             if (user.role !== 'admin') {
-              // If not admin, show a message and revert to personal view
               console.log("Non-admin user attempted to access team view");
               setViewType('personal');
               return;
@@ -101,23 +100,64 @@ const HistoryPage = () => {
             if (response.data.success && response.data.conversations) {
               const conversations = response.data.conversations;
               
-              // Format conversations for display with user information
-              const formattedHistory = conversations.map(convo => ({
-                id: convo._id,
+              // Filter out the current admin's own conversations if desired
+              const teamConversations = conversations.filter(
+                convo => convo.userId !== user._id 
+              );
+              
+              // Group conversations by user ID
+              const userActivityMap = new Map();
+              
+              teamConversations.forEach(convo => {
+                const userId = convo.userId;
+                if (!userId) return; // Skip conversations without a user ID
+
+                if (!userActivityMap.has(userId)) {
+                  userActivityMap.set(userId, {
+                    userId: userId,
+                    userName: convo.userName || 'Team Member',
+                    userEmail: convo.userEmail || '',
+                    conversationCount: 0,
+                    lastActivityTimestamp: new Date(0), // Initialize for comparison
+                    lastGptName: '',
+                  });
+                }
+                
+                const userData = userActivityMap.get(userId);
+                userData.conversationCount += 1;
+                
+                const currentTimestamp = new Date(convo.updatedAt || convo.createdAt);
+                if (currentTimestamp > userData.lastActivityTimestamp) {
+                  userData.lastActivityTimestamp = currentTimestamp;
+                  userData.lastGptName = convo.gptName || 'AI Assistant';
+                }
+              });
+              
+              // Convert map to an array of user summaries
+              const userSummaries = Array.from(userActivityMap.values());
+              
+              // Sort users by last activity (most recent first)
+              userSummaries.sort((a, b) => 
+                b.lastActivityTimestamp - a.lastActivityTimestamp
+              );
+
+              // Format for display
+              const formattedHistory = userSummaries.map(summary => ({
+                id: summary.userId, // Use userId as the key/id for the summary item
                 user: { 
-                  id: convo.userId, 
-                  name: convo.userName || 'Team Member', 
-                  email: convo.userEmail || '' 
+                  id: summary.userId, 
+                  name: summary.userName, 
+                  email: summary.userEmail 
                 },
-                action: 'Chat conversation',
-                details: `with ${convo.gptName || 'AI Assistant'}`,
-                timestamp: convo.updatedAt || convo.createdAt,
-                conversation: convo,
-                type: 'chat'
+                action: `Had ${summary.conversationCount} conversation(s)`,
+                details: `Last interaction with ${summary.lastGptName}`,
+                timestamp: summary.lastActivityTimestamp,
+                type: 'user_summary' // New type to differentiate rendering
               }));
               
               setActivities(formattedHistory);
               setFilteredActivities(formattedHistory);
+
             } else {
               setActivities([]);
               setFilteredActivities([]);
@@ -125,12 +165,10 @@ const HistoryPage = () => {
           } catch (error) {
             console.warn("Team history view error:", error);
             
-            // If we get a 403 Forbidden error, the user doesn't have permission
+            // Handle errors appropriately
             if (error.response?.status === 403) {
-              // Show personal view instead and disable team tab
               setViewType('personal');
             } else {
-              // For other errors, still fall back to personal view
               setViewType('personal');
             }
           }
@@ -192,7 +230,7 @@ const HistoryPage = () => {
     if (action.includes('Edited') || action.includes('Updated') || action.includes('Modified')) return 'edit';
     if (action.includes('Deleted') || action.includes('Removed')) return 'delete';
     if (action.includes('Changed settings') || action.includes('Updated settings')) return 'settings';
-    return 'chat'; // Default changed to chat as most activities will be chats now
+    return 'chat'; // Default to chat as most activities will be chats now
   };
 
   // Handle chat history item click
@@ -413,7 +451,9 @@ const HistoryPage = () => {
             <p className="text-sm max-w-sm">
               {searchQuery || filterOptions.dateRange !== 'all' || !Object.values(filterOptions.actionTypes).every(v => v)
                 ? "No activities match your current filters. Try adjusting your search or filter criteria."
-                : `No activities recorded yet for the ${viewType} view. Changes will appear here.`
+                : viewType === 'team'
+                  ? "No team activities found. Team member activity will appear here."
+                  : "No personal activities recorded yet. Your chat history will appear here."
               }
             </p>
           </div>
@@ -424,58 +464,81 @@ const HistoryPage = () => {
                 <div 
                   key={activity.id} 
                   className={`relative bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-750 border border-gray-300 dark:border-gray-700 rounded-lg p-4 ml-4 transition-colors ${
-                    activity.type === 'chat' ? 'cursor-pointer' : ''
-                  }`}
-                  onClick={() => activity.type === 'chat' && activity.conversation && handleChatHistoryClick(activity.conversation)}
+                    (activity.type === 'user_summary' || activity.type === 'chat') ? 'cursor-pointer group' : '' 
+                  } ${activity.type === 'user_summary' ? '' : activity.isSecondaryUserConvo ? 'ml-8 border-l-4 border-l-blue-500/30' : ''}`}
+                  
+                  onClick={() => {
+                    if (activity.type === 'user_summary') {
+                      navigate(`/admin/history/user/${activity.user.id}?view=${viewType}`);
+                    } else if (activity.type === 'chat' && activity.conversation) {
+                      navigate(`/admin/chat/${activity.conversation.gptId}?conversationId=${activity.conversation._id}`);
+                    }
+                  }}
                 >
-                  {/* Timeline marker dot */}
                   <div className="absolute -left-[10px] top-[50%] transform -translate-y-1/2 flex items-center justify-center w-5 h-5 rounded-full bg-gray-200 dark:bg-gray-700 border-2 border-gray-300 dark:border-gray-600">
-                    {activity.type === 'chat' ? (
-                      <IoChatbubblesOutline size={10} className="text-blue-500"/> 
+                    {activity.type === 'user_summary' ? (
+                      <IoPersonOutline size={10} className="text-purple-500"/> 
+                    ) : activity.type === 'chat' && activity.isSecondaryUserConvo ? (
+                       <IoChatbubblesOutline size={10} className={'text-blue-400'}/> 
+                    ) : activity.type === 'chat' ? (
+                       <IoChatbubblesOutline size={10} className={'text-blue-500'}/> 
                     ) : (
-                      <IoEllipse size={6} className="text-gray-500 dark:text-gray-400"/> 
+                       <IoEllipse size={6} className="text-gray-500 dark:text-gray-400"/> 
                     )}
                   </div>
                   
-                  {/* Activity content */}
                   <div className="flex justify-between items-start gap-4">
                     <div>
-                      {viewType === 'team' && (
+                      {(activity.type === 'user_summary' || (viewType === 'personal' && activity.type === 'chat') || (viewType === 'team' && !activity.isSecondaryUserConvo)) && activity.user && (
                         <div className="mb-1.5 flex items-center">
                           <span 
-                            className="font-semibold text-gray-900 dark:text-white cursor-pointer hover:underline"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigate(`/admin/history/user/${activity.user.id}?view=${viewType}`);
-                            }}
-                          >
-                            {activity.user.name}
+                             className={`font-semibold text-gray-900 dark:text-white ${activity.type === 'user_summary' ? 'cursor-pointer group-hover:underline' : ''}`}
+                             onClick={(e) => {
+                               if (activity.type === 'user_summary') {
+                                  e.stopPropagation();
+                                  navigate(`/admin/history/user/${activity.user.id}?view=${viewType}`);
+                               }
+                             }}
+                           >
+                             {viewType === 'personal' ? 'You' : activity.user?.name || 'Team Member'}
+                             
+                             {activity.type === 'user_summary' && activity.totalUserConversations > 1 && (
+                              <span className="ml-2 text-xs font-normal text-gray-500 dark:text-gray-400">
+                                ({activity.totalUserConversations} conversations)
+                              </span>
+                            )}
                           </span>
                         </div>
                       )}
                       
+                      {viewType === 'team' && activity.isSecondaryUserConvo && (
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                          Same user, different conversation
+                        </div>
+                      )}
+                      
                       <p className="text-sm">
-                        <span className="text-gray-700 dark:text-gray-300">{activity.action}</span>
+                         <span className="text-gray-700 dark:text-gray-300">{activity.action}</span>
+                         
                         {activity.details && (
-                          <> <span className="font-medium text-gray-900 dark:text-white">{activity.details}</span></>
+                           <> - <span className="font-medium text-gray-900 dark:text-white">{activity.details}</span></>
                         )}
                       </p>
                       
-                      {/* Preview for chat conversations */}
                       {activity.type === 'chat' && activity.conversation?.messages && activity.conversation.messages.length > 0 && (
                         <div className="mt-2 bg-gray-200 dark:bg-gray-700 rounded p-2 text-xs text-gray-600 dark:text-gray-300">
                           <div className="line-clamp-1">
                             <span className="font-semibold">Last message: </span>
                             {activity.conversation.lastMessage || activity.conversation.messages[activity.conversation.messages.length - 1].content.substring(0, 50)}
                           </div>
-                          <div className="mt-1 text-gray-500 dark:text-gray-400 text-[10px]">
-                            Click to continue conversation
-                          </div>
+                           <div className="mt-1 text-gray-500 dark:text-gray-400 text-[10px] group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                              Click to view conversation
+                           </div>
                         </div>
                       )}
                     </div>
                     
-                    <div className="text-xs text-gray-500 dark:text-gray-500 whitespace-nowrap">
+                    <div className="text-xs text-gray-500 dark:text-gray-500 whitespace-nowrap flex-shrink-0">
                       {formatTimestamp(activity.timestamp)}
                     </div>
                   </div>

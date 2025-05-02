@@ -9,6 +9,58 @@ const jwt = require('jsonwebtoken');
 const UserGptAssignment = require('../models/UserGptAssignment');
 const multer = require('multer');
 const { uploadToR2, deleteFromR2 } = require('../lib/r2');
+const mongoose = require('mongoose');
+const UserFavorite = require('../models/UserFavorite');
+const ChatHistory = require('../models/ChatHistory');
+
+
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'your-secure-encryption-key-exactly-32-b'; // Make this exactly 32 bytes
+const IV_LENGTH = 16; // For AES, this is always 16 bytes
+
+// Function to encrypt API keys
+function encrypt(text) {
+    try {
+        // Ensure key is exactly 32 bytes
+        let key = Buffer.from(ENCRYPTION_KEY);
+        if (key.length !== 32) {
+            const newKey = Buffer.alloc(32);
+            key.copy(newKey, 0, 0, Math.min(key.length, 32));
+            key = newKey;
+        }
+        
+        const iv = crypto.randomBytes(IV_LENGTH);
+        const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+        let encrypted = cipher.update(text);
+        encrypted = Buffer.concat([encrypted, cipher.final()]);
+        return iv.toString('hex') + ':' + encrypted.toString('hex');
+    } catch (err) {
+        console.error("Encryption error:", err);
+        throw err;
+    }
+}
+
+// Function to decrypt API keys
+function decrypt(text) {
+    try {
+        let key = Buffer.from(ENCRYPTION_KEY);
+        if (key.length !== 32) {
+            const newKey = Buffer.alloc(32);
+            key.copy(newKey, 0, 0, Math.min(key.length, 32));
+            key = newKey;
+        }
+        
+        const textParts = text.split(':');
+        const iv = Buffer.from(textParts.shift(), 'hex');
+        const encryptedText = Buffer.from(textParts.join(':'), 'hex');
+        const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+        let decrypted = decipher.update(encryptedText);
+        decrypted = Buffer.concat([decrypted, decipher.final()]);
+        return decrypted.toString();
+    } catch (err) {
+        console.error("Decryption error:", err);
+        return '';
+    }
+}
 
 // --- Multer setup for profile picture ---
 const profilePicStorage = multer.memoryStorage();
@@ -251,18 +303,79 @@ const removeTeamMember = async (req, res) => {
     try {
         const { userId } = req.params;
         
+        // Verify user is an admin
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ 
+                success: false, 
+                message: 'Only admins can remove team members' 
+            });
+        }
+        
         // Check if user exists
         const user = await User.findById(userId);
         if (!user) {
-            return res.status(404).json({ message: 'User not found' });
+            return res.status(404).json({ 
+                success: false, 
+                message: 'User not found' 
+            });
         }
         
-        // Delete user
-        await User.findByIdAndDelete(userId);
+        // Start a session for transaction
+        const session = await mongoose.startSession();
+        session.startTransaction();
         
-        res.status(200).json({ success: true, message: 'User removed successfully' });
+        try {
+            // Log what we're deleting to debug
+            console.log(`Deleting chat history for user ${userId}`);
+            
+            // Check and log chat history count before deletion
+            const chatHistoryCount = await ChatHistory.countDocuments({ userId });
+            console.log(`Found ${chatHistoryCount} chat history records for user ${userId}`);
+            
+            // Delete all associated data - don't use the session initially to isolate issues
+            // 1. Delete user's chat history
+            const chatResult = await ChatHistory.deleteMany({ userId });
+            console.log(`ChatHistory deletion result: ${JSON.stringify(chatResult)}`);
+            
+            // 2. Delete user's GPT assignments
+            const gptResult = await UserGptAssignment.deleteMany({ userId });
+            console.log(`UserGptAssignment deletion result: ${JSON.stringify(gptResult)}`);
+            
+            // 3. Delete user's favorites
+            const favResult = await UserFavorite.deleteMany({ userId });
+            console.log(`UserFavorite deletion result: ${JSON.stringify(favResult)}`);
+            
+            // 4. Finally, delete the user
+            const userResult = await User.findByIdAndDelete(userId);
+            console.log(`User deletion result: ${userResult ? 'Success' : 'Failed'}`);
+            
+            // Commit the transaction
+            await session.commitTransaction();
+            session.endSession();
+            
+            return res.status(200).json({ 
+                success: true, 
+                message: 'User and all associated data removed successfully',
+                deletionResults: {
+                    chatHistory: chatResult,
+                    gptAssignments: gptResult,
+                    favorites: favResult,
+                    user: !!userResult
+                }
+            });
+        } catch (error) {
+            // If any operation fails, abort the transaction
+            await session.abortTransaction();
+            session.endSession();
+            throw error;
+        }
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        console.error('Error removing team member:', error);
+        return res.status(500).json({ 
+            success: false, 
+            message: 'Failed to remove team member', 
+            error: error.message 
+        });
     }
 };
 
@@ -313,11 +426,10 @@ const inviteTeamMember = async (req, res) => {
     
     await invitation.save();
     
-    // Send email invitation
-    const inviteUrl = `${process.env.FRONTEND_URL}/register?token=${token}`;
+    // Send email invitation - include the role in the URL for proper redirection
+    const inviteUrl = `${process.env.FRONTEND_URL}/register?token=${token}&role=${role}`;
     
-    // Here you would integrate with your email service (SendGrid, Nodemailer, etc.)
-    // For example with Nodemailer:
+    // Update the mail template to indicate the redirect path based on role
     const mailOptions = {
       from: process.env.EMAIL_FROM,
       to: email,
@@ -328,6 +440,7 @@ const inviteTeamMember = async (req, res) => {
         <p>Click the link below to create your account:</p>
         <a href="${inviteUrl}" style="padding: 10px 15px; background-color: #3182ce; color: white; border-radius: 5px; text-decoration: none;">Accept Invitation</a>
         <p>This invitation expires in 7 days.</p>
+        <p>After registration, you will be redirected to the ${role === 'admin' ? 'admin' : 'employee'} dashboard.</p>
       `
     };
     
@@ -422,11 +535,11 @@ const getUsersWithGptCounts = async (req, res) => {
         const limit = parseInt(req.query.limit) || 10;
         const skip = (page - 1) * limit;
         
-        // Get total count first
-        const total = await User.countDocuments({});
+        // Get total count first - excluding the current user
+        const total = await User.countDocuments({ _id: { $ne: req.user._id } });
         
-        // Get users with pagination
-        const users = await User.find({})
+        // Get users with pagination - excluding the current user
+        const users = await User.find({ _id: { $ne: req.user._id } })
             .select('-password')
             .sort({ createdAt: -1 })
             .skip(skip)
@@ -709,4 +822,123 @@ const changePassword = async (req, res) => {
     }
 };
 
-module.exports = { Signup, Login, Logout, googleAuth, googleAuthCallback, refreshTokenController, getCurrentUser, getAllUsers, inviteTeamMember, getPendingInvitesCount, setInactive, removeTeamMember, getUsersWithGptCounts, getUserGptCount, getUserActivity, getUserNotes, addUserNote, deleteUserNote, updateUserProfile, updateUserProfilePicture, changePassword };
+
+// Get user's API keys
+const getApiKeys = async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id).select('+apiKeys');
+        
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+        
+        // Initialize apiKeys object if it doesn't exist
+        if (!user.apiKeys) {
+            return res.json({ success: true, apiKeys: {} });
+        }
+        
+        // Decrypt API keys for frontend use
+        const decryptedKeys = {};
+        for (const [key, value] of Object.entries(user.apiKeys)) {
+            if (value) {
+                decryptedKeys[key] = decrypt(value);
+            } else {
+                decryptedKeys[key] = '';
+            }
+        }
+        
+        return res.json({ success: true, apiKeys: decryptedKeys });
+    } catch (error) {
+        console.error('Error getting API keys:', error);
+        return res.status(500).json({ success: false, message: 'Server error' });
+    }
+};
+
+// Save user's API keys
+const saveApiKeys = async (req, res) => {
+    try {
+        console.log("Request body received:", req.body);
+        const { apiKeys } = req.body;
+        
+        if (!apiKeys) {
+            console.log("No API keys in request body");
+            return res.status(400).json({ success: false, message: 'No API keys provided' });
+        }
+        
+        console.log("User ID:", req.user._id);
+        console.log("API keys to encrypt:", Object.keys(apiKeys));
+        
+        const user = await User.findById(req.user._id).select('+apiKeys');
+        
+        if (!user) {
+            console.log("User not found");
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+        
+        // Encrypt API keys for storage
+        const encryptedKeys = {};
+        for (const [key, value] of Object.entries(apiKeys)) {
+            console.log(`Encrypting key: ${key}`);
+            if (value) {
+                try {
+                    encryptedKeys[key] = encrypt(value);
+                    console.log(`Successfully encrypted ${key}`);
+                } catch (err) {
+                    console.error(`Error encrypting ${key}:`, err);
+                    throw err;
+                }
+            }
+        }
+        
+        // Store encrypted keys
+        console.log("Setting user.apiKeys");
+        user.apiKeys = encryptedKeys;
+        
+        console.log("Saving user");
+        await user.save();
+        console.log("User saved successfully");
+        
+        return res.json({ success: true, message: 'API keys saved successfully' });
+    } catch (error) {
+        console.error('Error saving API keys:', error);
+        return res.status(500).json({ success: false, message: error.message || 'Server error' });
+    }
+};
+
+// Update password 
+const updatePassword = async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+        
+        // Validate inputs
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ success: false, message: 'All fields are required' });
+        }
+        
+        // Find user
+        const user = await User.findById(req.user._id).select('+password');
+        
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+        
+        // Check if current password is correct
+        const isMatch = await bcrypt.compare(currentPassword, user.password);
+        if (!isMatch) {
+            return res.status(400).json({ success: false, message: 'Current password is incorrect' });
+        }
+        
+        // Hash new password
+        const salt = await bcrypt.genSalt(10);
+        user.password = await bcrypt.hash(newPassword, salt);
+        
+        await user.save();
+        
+        return res.json({ success: true, message: 'Password updated successfully' });
+    } catch (error) {
+        console.error('Error updating password:', error);
+        return res.status(500).json({ success: false, message: 'Server error' });
+    }
+};
+
+module.exports = { Signup, Login, Logout, googleAuth, googleAuthCallback, refreshTokenController, getCurrentUser, getAllUsers, inviteTeamMember, getPendingInvitesCount, setInactive, removeTeamMember, getUsersWithGptCounts, getUserGptCount, getUserActivity, getUserNotes, addUserNote, deleteUserNote, updateUserProfile, updateUserProfilePicture, changePassword, getApiKeys, saveApiKeys, updatePassword };

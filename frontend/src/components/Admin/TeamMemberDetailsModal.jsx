@@ -16,8 +16,10 @@ import { axiosInstance } from '../../api/axiosInstance';
 import { toast } from 'react-toastify';
 import AssignGptsModal from './AssignGptsModal';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
 
 const TeamMemberDetailsModal = ({ isOpen, onClose, member }) => {
+    const { user } = useAuth();
     const [activeTab, setActiveTab] = useState('profile');
     const [memberGpts, setMemberGpts] = useState([]);
     const [userActivity, setUserActivity] = useState([]);
@@ -194,7 +196,8 @@ const TeamMemberDetailsModal = ({ isOpen, onClose, member }) => {
         setShowAssignGptsModal(true);
     };
 
-    if (!isOpen || !member) return null;
+    // Add this check to prevent rendering for current user
+    if (!isOpen || !member || user?._id === member.id) return null;
 
     // Format date for display
     const formatDate = (dateString) => {

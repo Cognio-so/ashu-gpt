@@ -21,4 +21,7 @@ router.get('/conversation/:userId/:gptId', chatHistoryController.getConversation
 // Delete a conversation
 router.delete('/:userId/:conversationId', chatHistoryController.deleteConversation);
 
+// --- NEW ROUTE for Admin to get specific conversation by ID ---
+router.get('/admin/conversation/:conversationId', chatHistoryController.getAdminConversationById);
+
 module.exports = router; 

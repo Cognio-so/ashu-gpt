@@ -203,4 +203,43 @@ exports.getTeamHistory = async (req, res) => {
             error: error.message 
         });
     }
+};
+
+exports.getAdminConversationById = async (req, res) => {
+    try {
+        const { conversationId } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+            return res.status(400).json({ success: false, message: 'Invalid Conversation ID format' });
+        }
+
+        // Find conversation by ID, populate user details if needed
+        // Ensure the admin has permission via middleware (adminOnly)
+        const conversation = await ChatHistory.findById(conversationId)
+            .populate('userId', 'name email') // Optional: include basic user info
+            .lean(); // Use lean for performance if not modifying
+
+        if (!conversation) {
+            return res.status(404).json({ success: false, message: 'Conversation not found' });
+        }
+
+        // Format messages similar to other endpoints
+        const formattedConversation = {
+            ...conversation,
+            userName: conversation.userId?.name || 'Unknown User', // Add userName if populated
+            userEmail: conversation.userId?.email || '', // Add userEmail if populated
+            messages: conversation.messages.map(msg => ({
+                role: msg.role,
+                content: msg.content,
+                timestamp: msg.timestamp
+            }))
+        };
+        // Remove populated userId object if you only want the ID string
+        // formattedConversation.userId = conversation.userId?._id || conversation.userId; 
+
+        res.json({ success: true, conversation: formattedConversation });
+    } catch (error) {
+        console.error('Error fetching conversation by ID for admin:', error);
+        res.status(500).json({ success: false, message: 'Error fetching conversation', error: error.message });
+    }
 }; 
