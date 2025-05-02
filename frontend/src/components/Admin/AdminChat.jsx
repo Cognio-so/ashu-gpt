@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import AdminMessageInput from './AdminMessageInput';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -87,6 +87,7 @@ const MarkdownStyles = () => (
 const AdminChat = () => {
     const { gptId } = useParams();
     const navigate = useNavigate();
+    const location = useLocation();
     const { user, loading: authLoading } = useAuth();
     const { isDarkMode } = useTheme();
     const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -223,9 +224,9 @@ const AdminChat = () => {
                      // Setup collection name, notify opened (if needed for admin view)
                     const sanitizedEmail = (user.email || 'admin').replace(/[^a-zA-Z0-9]/g, '_');
                     const sanitizedGptName = (fetchedGptData.name || 'gpt').replace(/[^a-zA-Z0-9]/g, '_');
-                    setCollectionName(`kb_${sanitizedEmail}_${sanitizedGptName}_${gptId}`); // Consider if admin needs own collection context
-                    // Maybe skip notifyGptOpened for admin view unless specifically required
-                    // notifyGptOpened(fetchedGptData, user).catch(err => console.warn("[AdminChat] Notify error:", err));
+                    setCollectionName(`kb_${sanitizedEmail}_${sanitizedGptName}_${gptId}`);
+                    // UNCOMMENT this line to notify the backend about the GPT and its model
+                    notifyGptOpened(fetchedGptData, user).catch(err => console.warn("[AdminChat] Notify error:", err));
 
                 } else {
                     console.warn("[AdminChat] Failed GPT fetch:", gptResponse.data);
@@ -407,9 +408,9 @@ const AdminChat = () => {
             
             const payload = {
                 message,
-                gpt_id: gptId,
-                user_email: user?.email || 'unknown_admin',
-                gpt_name: gptData?.name || 'unknown_gpt',
+                gpt_id: gptId, 
+                user_email: user?.email || 'unknown_admin', 
+                gpt_name: gptData?.name || 'unknown_gpt', 
                 user_documents: userDocuments,
                 model: gptData?.model || 'gpt-4o-mini',
                 memory: updatedMemory,
@@ -691,96 +692,95 @@ const AdminChat = () => {
         }
     }, [streamingMessage]);
 
-    // Update handleStreamingResponse to save completed assistant messages
+    // Replace the handleStreamingResponse function with this exact implementation matching UserChat.jsx
     const handleStreamingResponse = async (response) => {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
+        let buffer = ""; // Accumulates the full response content
+        let doneStreaming = false;
+        
+        const messageId = streamingMessage?.id || Date.now();
+        console.log(`[Stream ${messageId}] Starting to read stream.`);
         
         try {
-            while (true) {
+            while (!doneStreaming) {
                 const { done, value } = await reader.read();
                 
                 if (done) {
-                    // Save the complete message to history when streaming is done
-                    if (streamingMessage) {
-                        await saveMessageToHistory(streamingMessage.content, 'assistant');
-                    }
-                    
-                    setStreamingMessage(prev => prev ? { ...prev, isStreaming: false } : null);
-                    break;
+                    console.log(`[Stream ${messageId}] Stream finished.`);
+                    doneStreaming = true;
+                    break; // Exit the loop
                 }
                 
-                const text = decoder.decode(value, {stream: true});
-                console.log("Raw streaming data:", text);
-                
-                const trimmedText = text.trim();
-                if (trimmedText) {
-                    try {
-                        // Try to parse it as full JSON for better debugging
-                        const parsed = JSON.parse(trimmedText);
-                        console.log("Full parsed stream chunk:", parsed);
-                    } catch {
-                        // If not valid JSON, just log the raw text
-                        console.log("Raw stream chunk text:", trimmedText.substring(0, 100) + (trimmedText.length > 100 ? "..." : ""));
-                    }
-                }
-                
-                const lines = text.split('\n').filter(line => line.trim());
+                const chunk = decoder.decode(value, { stream: true });
+                const lines = chunk.split('\n').filter(line => line.trim().startsWith('data: '));
                 
                 for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        try {
-                            const jsonStr = line.substring(6);
-                            const parsed = JSON.parse(jsonStr);
-                            
-                            if (parsed.error) {
-                                console.error("Streaming Error:", parsed.error);
-                                setStreamingMessage({
-                                    id: Date.now(),
-                                    role: 'assistant',
-                                    content: `Error: ${parsed.error}`,
-                                    isStreaming: false,
-                                    timestamp: new Date()
-                                });
-                                return;
-                            }
-                            
-                            if (parsed.done === true) {
-                                setStreamingMessage(prev => prev ? { ...prev, isStreaming: false } : null);
-                                return;
-                            }
-                            
-                            if (parsed.content) {
-                                setStreamingMessage((prev) => ({
-                                    id: prev?.id || Date.now(),
-                                    role: 'assistant',
-                                    content: prev ? prev.content + parsed.content : parsed.content,
-                                    isStreaming: true,
-                                    timestamp: prev?.timestamp || new Date()
-                                }));
-                            }
-                        } catch (e) {
-                            console.error("Error parsing streaming line:", e, "Line:", line);
+                    try {
+                        const jsonStr = line.substring(6);
+                        const parsed = JSON.parse(jsonStr);
+                        
+                        if (parsed.error) {
+                            console.error(`[Stream ${messageId}] Streaming Error:`, parsed.error);
+                            buffer = `Error: ${parsed.error}`; // Update buffer with error
+                            doneStreaming = true; // Treat error as end of stream
+                            setStreamingMessage(prev => 
+                                prev ? { ...prev, content: buffer, isStreaming: false, isError: true } : 
+                                { id: messageId, role: 'assistant', content: buffer, isStreaming: false, isError: true, timestamp: new Date() }
+                            );
+                            break; // Stop processing lines for this chunk on error
                         }
+                        
+                        if (parsed.done === true) {
+                            console.log(`[Stream ${messageId}] Done signal received.`);
+                            doneStreaming = true; // Mark as done
+                            break; // Stop processing lines for this chunk
+                        }
+                        
+                        if (parsed.content) {
+                            buffer += parsed.content; // Append content to the buffer
+                            setStreamingMessage(prev => 
+                                prev ? { ...prev, content: buffer, isStreaming: true, isError: false } : 
+                                { id: messageId, role: 'assistant', content: buffer, isStreaming: true, isError: false, timestamp: new Date() }
+                            );
+                        }
+                    } catch (e) {
+                        console.error(`[Stream ${messageId}] Error parsing line:`, e, "Line:", line);
                     }
                 }
             }
-        } catch (err) {
-            console.error("Error reading stream:", err);
-            const errorContent = "Error reading response stream.";
-            setStreamingMessage({
-                id: Date.now(),
-                role: 'assistant',
-                content: errorContent,
-                isStreaming: false,
-                timestamp: new Date()
-            });
             
-            // Save error message to history
-            await saveMessageToHistory(errorContent, 'assistant');
+            // Final Update After Stream Ends
+            console.log(`[Stream ${messageId}] Finalizing state. Full content length: ${buffer.length}`);
+            setStreamingMessage(prev => 
+                prev ? { 
+                    ...prev, 
+                    content: buffer || (prev.isError ? prev.content : "Empty response"), 
+                    isStreaming: false,
+                    isLoading: false,
+                    isError: prev.isError || !buffer.trim()
+                } : null
+            );
+            
+            // Save the final content (or error) to history
+            if (buffer || streamingMessage?.isError) {
+                await saveMessageToHistory(buffer || streamingMessage?.content, 'assistant');
+                console.log(`[Stream ${messageId}] Final message saved to history.`);
+            } else {
+                console.warn(`[Stream ${messageId}] No final content buffer to save.`);
+            }
+            
+        } catch (err) {
+            console.error(`[Stream ${messageId}] Error reading stream:`, err);
+            // Update with stream reading error
+            setStreamingMessage(prev => 
+                prev ? { ...prev, content: "Error reading response stream.", isStreaming: false, isLoading: false, isError: true } : 
+                { id: messageId, role: 'assistant', content: "Error reading response stream.", isStreaming: false, isLoading: false, isError: true, timestamp: new Date() }
+            );
+            await saveMessageToHistory("Error reading response stream.", 'assistant'); // Save error
         } finally {
-            console.log(`[Stream ${streamingMessage?.id}] Cleaning up. Setting loading to false.`);
-            setLoading(prev => ({ ...prev, message: false }));
+            console.log(`[Stream ${messageId}] Cleaning up. Setting loading to false.`);
+            setLoading(prev => ({ ...prev, message: false })); // Ensure loading always stops
         }
     };
 
