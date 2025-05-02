@@ -19,6 +19,10 @@ const UserGptAssignmentSchema = new mongoose.Schema({
   assignedAt: {
     type: Date,
     default: Date.now
+  },
+  folder: {
+    type: String,
+    default: 'Uncategorized'
   }
 }, { timestamps: true });
 

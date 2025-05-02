@@ -86,11 +86,11 @@ const Sidebar = ({ activePage = 'dashboard', onNavigate }) => {
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: <IoGridOutline size={20} /> },
-    { 
-      id: 'collections', 
-      label: 'Collections', 
-      icon: <IoFolderOpenOutline size={20} />
-    },
+    // { 
+    //   id: 'collections', 
+    //   label: 'Collections', 
+    //   icon: <IoFolderOpenOutline size={20} />
+    // },
     { id: 'favourites', label: 'Favourites', icon: <IoHeartOutline size={20} /> },
     { id: 'history', label: 'History', icon: <IoTimeOutline size={20} /> },
     { id: 'settings', label: 'Settings', icon: <IoSettingsOutline size={20} /> },

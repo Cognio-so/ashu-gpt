@@ -221,14 +221,13 @@ const CollectionsPage = () => {
         if (newFolderName && !folders.includes(newFolderName)) {
             setFolders(prevFolders => [...prevFolders, newFolderName]);
         }
-        // Optionally, switch view to the new folder? Or stay in 'All'
-        // setSelectedFolder(newFolderName || 'Uncategorized'); 
+      
         setShowMoveModal(false);
         setGptToMove(null);
         toast.success(`GPT "${movedGpt.name}" moved successfully.`);
     }, [folders]); // Include folders in dependency array
 
-    // Memoized filtered and sorted GPTs with folder support
+    
     const filteredGpts = useMemo(() => {
         return customGpts
             .filter(gpt => {
@@ -290,7 +289,7 @@ const CollectionsPage = () => {
     return (
         <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-900 text-black dark:text-white p-4 sm:p-6 overflow-hidden">
             {/* Header */}
-            <div className="mb-4 md:mb-6 flex-shrink-0 text-center sm:text-left">
+            <div className="mb-4 md:mb-6 flex-shrink-0 text-center sm:text-left ">
                 <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">Collections</h1>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Manage your custom GPTs</p>
             </div>

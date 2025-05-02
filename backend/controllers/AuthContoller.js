@@ -7,6 +7,22 @@ const Invitation = require('../models/Invitation');
 const nodemailer = require('nodemailer');
 const jwt = require('jsonwebtoken');
 const UserGptAssignment = require('../models/UserGptAssignment');
+const multer = require('multer');
+const { uploadToR2, deleteFromR2 } = require('../lib/r2');
+
+// --- Multer setup for profile picture ---
+const profilePicStorage = multer.memoryStorage();
+const profilePicUpload = multer({
+    storage: profilePicStorage,
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit for profile pics
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith('image/')) {
+            cb(null, true);
+        } else {
+            cb(new Error('Not an image! Please upload an image file.'), false);
+        }
+    }
+}).single('profileImage');
 
 const Signup = async (req, res) => {
     const { name, email, password } = req.body;
@@ -560,4 +576,137 @@ const deleteUserNote = async (req, res) => {
     }
 };
 
-module.exports = { Signup, Login, Logout, googleAuth, googleAuthCallback, refreshTokenController, getCurrentUser, getAllUsers, inviteTeamMember, getPendingInvitesCount, setInactive, removeTeamMember, getUsersWithGptCounts, getUserGptCount, getUserActivity, getUserNotes, addUserNote, deleteUserNote };
+// Update User Profile (Name, Email)
+const updateUserProfile = async (req, res) => {
+    const { name, email } = req.body;
+    const userId = req.user._id;
+
+    try {
+        if (!name && !email) {
+            return res.status(400).json({ success: false, message: 'Please provide name or email to update.' });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+
+        if (email && email !== user.email) {
+            const existingUser = await User.findOne({ email: email });
+            if (existingUser) {
+                return res.status(400).json({ success: false, message: 'Email address already in use.' });
+            }
+            user.email = email;
+        }
+
+        if (name) {
+            user.name = name;
+        }
+
+        await user.save();
+
+        const updatedUser = await User.findById(userId).select('-password');
+
+        res.status(200).json({
+            success: true,
+            message: 'Profile updated successfully.',
+            user: updatedUser
+        });
+
+    } catch (error) {
+        console.error('Error updating user profile:', error);
+        res.status(500).json({ success: false, message: 'Server error updating profile.' });
+    }
+};
+
+// Upload/Update Profile Picture
+const updateUserProfilePicture = async (req, res) => {
+    const userId = req.user._id;
+
+    try {
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: 'No image file provided.' });
+        }
+
+        if (user.profilePic) {
+             try {
+                 if (process.env.R2_PUBLIC_URL && user.profilePic.startsWith(process.env.R2_PUBLIC_URL)) {
+                     const key = user.profilePic.replace(process.env.R2_PUBLIC_URL + '/', '');
+                     await deleteFromR2(key);
+                     console.log(`Deleted old profile picture from R2: ${key}`);
+                 }
+             } catch (deleteError) {
+                 console.error("Failed to delete old profile picture, proceeding anyway:", deleteError);
+             }
+        }
+
+        const { fileUrl } = await uploadToR2(
+            req.file.buffer,
+            req.file.originalname,
+            `profile-pics/${userId}`
+        );
+
+        user.profilePic = fileUrl;
+        await user.save();
+
+        const updatedUser = await User.findById(userId).select('-password');
+
+        res.status(200).json({
+            success: true,
+            message: 'Profile picture updated successfully.',
+            user: updatedUser
+        });
+
+    } catch (error) {
+        console.error('Error updating profile picture:', error);
+         if (error.message.includes('Not an image')) {
+             return res.status(400).json({ success: false, message: 'Invalid file type. Please upload an image.' });
+         }
+        res.status(500).json({ success: false, message: 'Server error updating profile picture.' });
+    }
+};
+
+// Change Password
+const changePassword = async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user._id;
+
+    try {
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ success: false, message: 'Please provide both current and new passwords.' });
+        }
+        if (newPassword.length < 6) {
+            return res.status(400).json({ success: false, message: 'New password must be at least 6 characters long.' });
+        }
+
+        const user = await User.findById(userId).select('+password');
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+
+        const isMatch = await bcrypt.compare(currentPassword, user.password);
+        if (!isMatch) {
+            return res.status(400).json({ success: false, message: 'Incorrect current password.' });
+        }
+
+        const salt = await bcrypt.genSalt(10);
+        user.password = await bcrypt.hash(newPassword, salt);
+        await user.save();
+
+        res.status(200).json({
+            success: true,
+            message: 'Password updated successfully.'
+        });
+
+    } catch (error) {
+        console.error('Error changing password:', error);
+        res.status(500).json({ success: false, message: 'Server error changing password.' });
+    }
+};
+
+module.exports = { Signup, Login, Logout, googleAuth, googleAuthCallback, refreshTokenController, getCurrentUser, getAllUsers, inviteTeamMember, getPendingInvitesCount, setInactive, removeTeamMember, getUsersWithGptCounts, getUserGptCount, getUserActivity, getUserNotes, addUserNote, deleteUserNote, updateUserProfile, updateUserProfilePicture, changePassword };

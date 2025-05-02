@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const { Signup, Login, Logout, googleAuth, googleAuthCallback, refreshTokenController, getCurrentUser, getAllUsers, inviteTeamMember, getPendingInvitesCount, setInactive, removeTeamMember, getUsersWithGptCounts, getUserGptCount, getUserActivity, getUserNotes, addUserNote, deleteUserNote } = require('../controllers/AuthContoller');
+const { Signup, Login, Logout, googleAuth, googleAuthCallback, refreshTokenController, getCurrentUser, getAllUsers, inviteTeamMember, getPendingInvitesCount, setInactive, removeTeamMember, getUsersWithGptCounts, getUserGptCount, getUserActivity, getUserNotes, addUserNote, deleteUserNote, updateUserProfile, updateUserProfilePicture, changePassword } = require('../controllers/AuthContoller');
 const passport = require('passport');
 const { protectRoute } = require('../middleware/authMiddleware'); // Imports protectRoute
+const multer = require('multer'); // Import multer
 
 router.post('/signup', Signup);
 router.post('/login', Login);
@@ -37,5 +38,10 @@ router.get('/users/:userId/activity', protectRoute, getUserActivity);
 router.get('/users/:userId/notes', protectRoute, getUserNotes);
 router.post('/users/:userId/notes', protectRoute, addUserNote);
 router.delete('/users/:userId/notes/:noteId', protectRoute, deleteUserNote);
+
+// --- New User Settings Routes ---
+router.patch('/user/profile', protectRoute, updateUserProfile); // Update name/email
+router.post('/user/profile-picture', protectRoute, multer().single('profileImage'), updateUserProfilePicture); // Update profile picture (uses multer middleware first)
+router.post('/user/change-password', protectRoute, changePassword); // Change password
 
 module.exports = router;

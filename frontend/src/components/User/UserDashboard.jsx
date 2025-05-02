@@ -1,190 +1,492 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import ChatInput from './ChatInput';
-import { useAuth } from '../../context/AuthContext';
-import { useTheme } from '../../context/ThemeContext';
-import { IoPersonCircleOutline, IoSettingsOutline, IoPersonOutline, IoMoon, IoSunny } from 'react-icons/io5';
+import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
+import { FiSearch, FiMessageSquare, FiChevronDown, FiChevronUp, FiXCircle, FiHeart, FiFolder, FiPlus } from 'react-icons/fi';
 import { useNavigate } from 'react-router-dom';
+import { axiosInstance } from '../../api/axiosInstance';
+import { useTheme } from '../../context/ThemeContext';
+import MoveToFolderModal from './MoveToFolderModal';
+import { toast } from 'react-toastify';
+
+// Memoized GPT card component
+const GptCard = memo(({ gpt, formatDate, onChatClick, onToggleFavorite, onMoveToFolder, isDarkMode }) => (
+  <div 
+    key={gpt._id} 
+    className={`rounded-lg overflow-hidden border transition-all flex flex-col group ${
+      isDarkMode 
+        ? 'bg-gray-800 border-gray-700 hover:border-gray-600 shadow-lg hover:shadow-xl' 
+        : 'bg-white border-gray-200 hover:border-gray-300 shadow-md hover:shadow-lg'
+    }`}
+  >
+    <div className={`h-24 sm:h-32 relative flex-shrink-0 ${
+        !gpt.imageUrl && (isDarkMode ? 'bg-gradient-to-br from-gray-700 to-gray-900' : 'bg-gradient-to-br from-gray-100 to-gray-300')
+    }`}>
+      {gpt.imageUrl ? (
+        <img 
+          src={gpt.imageUrl} 
+          alt={gpt.name} 
+          className={`w-full h-full object-cover ${isDarkMode ? 'opacity-70' : 'opacity-90'}`}
+          loading="lazy"
+        />
+      ) : (
+        <div className={`w-full h-full flex items-center justify-center ${isDarkMode ? 'bg-gradient-to-br from-blue-900/50 to-purple-900/50' : 'bg-gradient-to-br from-blue-100/50 to-purple-100/50'}`}>
+          <span className={`text-3xl sm:text-4xl ${isDarkMode ? 'text-white/30' : 'text-gray-500/50'}`}>{gpt.name.charAt(0)}</span>
+        </div>
+      )}
+      
+      {/* Favorite Button */}
+       <button
+        onClick={(e) => { e.stopPropagation(); onToggleFavorite(gpt._id, gpt.isFavorite); }}
+        className={`absolute top-2 right-2 p-1.5 rounded-full transition-all ${
+          isDarkMode
+            ? 'bg-black/40 hover:bg-black/60'
+            : 'bg-white/60 hover:bg-white/80'
+        } ${
+          gpt.isFavorite
+            ? 'text-red-500 hover:text-red-400'
+            : 'text-gray-400 hover:text-red-500 dark:text-gray-500 dark:hover:text-red-500'
+        }`}
+        title={gpt.isFavorite ? "Remove from favorites" : "Add to favorites"}
+      >
+        <FiHeart size={16} fill={gpt.isFavorite ? "currentColor" : "none"} />
+      </button>
+      
+      {/* Move to Folder Button */}
+      <button
+        onClick={(e) => { e.stopPropagation(); onMoveToFolder(gpt); }}
+        className={`absolute top-2 right-10 p-1.5 rounded-full transition-all ${
+          isDarkMode
+            ? 'bg-black/40 hover:bg-black/60 text-gray-400 hover:text-blue-400'
+            : 'bg-white/60 hover:bg-white/80 text-gray-500 hover:text-blue-500'
+        }`}
+        title="Move to folder"
+      >
+        <FiFolder size={16} />
+      </button>
+    </div>
+    
+    <div className="p-3 sm:p-4 flex-grow flex flex-col">
+      <div className="flex items-start justify-between mb-1.5 sm:mb-2">
+        <h3 className={`font-semibold text-base sm:text-lg line-clamp-1 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{gpt.name}</h3>
+         <div className={`flex items-center flex-shrink-0 gap-1 px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-xs ${
+            isDarkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-200 text-gray-600'
+        }`}>
+          <span>{gpt.model || 'N/A'}</span>
+        </div>
+      </div>
+      
+      {gpt.folder && (
+            <div className={`flex items-center gap-1 text-xs mb-1.5 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                <FiFolder size={12} />
+                <span>{gpt.folder}</span>
+            </div>
+      )}
+
+      <p className={`text-xs sm:text-sm line-clamp-2 flex-grow ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+        {gpt.description || 'No description available.'}
+      </p>
+      
+       <div className={`mt-auto pt-2 border-t text-[10px] sm:text-xs flex justify-between items-center ${
+          isDarkMode ? 'border-gray-700 text-gray-400' : 'border-gray-200 text-gray-500'
+      }`}>
+        <span>Assigned: {formatDate(gpt.assignedAt || new Date())}</span>
+         {gpt.capabilities?.webBrowsing && (
+            <span className={`whitespace-nowrap px-1.5 py-0.5 rounded-full ${
+            isDarkMode ? 'bg-green-900/40 text-green-200' : 'bg-green-100 text-green-700'
+          }`}>Web</span>
+         )}
+      </div>
+      
+       <button 
+        className={`mt-3 w-full py-2 rounded-lg transition-colors text-white text-sm font-medium flex items-center justify-center gap-2 ${
+            isDarkMode ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-500 hover:bg-blue-600'
+        }`}
+        onClick={(e) => { e.stopPropagation(); onChatClick(gpt._id); }}
+      >
+        <FiMessageSquare size={16} />
+        Chat with GPT
+      </button>
+    </div>
+  </div>
+));
 
 const UserDashboard = () => {
-    const { user, loading } = useAuth();
-    const { isDarkMode, toggleTheme } = useTheme();
-    const [isProfileOpen, setIsProfileOpen] = useState(false);
-    const [userData, setUserData] = useState(null);
+    const [assignedGpts, setAssignedGpts] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [sortOption, setSortOption] = useState('newest');
+    const [showSortOptions, setShowSortOptions] = useState(false);
+    const sortDropdownRef = useRef(null);
     const navigate = useNavigate();
+    const { isDarkMode } = useTheme();
+    const [folders, setFolders] = useState(['All']);
+    const [selectedFolder, setSelectedFolder] = useState('All');
+    const [showMoveModal, setShowMoveModal] = useState(false);
+    const [gptToMove, setGptToMove] = useState(null);
+    const [showFolderOptions, setShowFolderOptions] = useState(false);
+    const folderDropdownRef = useRef(null);
     
-    // Use effect to debug and handle user data changes
-    useEffect(() => {
-        if (user) {
-            setUserData(user);
+    const fetchAssignedGpts = useCallback(async () => {
+        try {
+            setLoading(true);
+            setError(null);
+            const response = await axiosInstance.get(`/api/custom-gpts/user/assigned`, {
+                withCredentials: true
+            });
+            
+            if (response.data.success && Array.isArray(response.data.gpts)) {
+                const fetchedGpts = response.data.gpts;
+                setAssignedGpts(fetchedGpts);
+                const uniqueFolders = [...new Set(fetchedGpts
+                    .map(gpt => gpt.folder)
+                    .filter(folder => folder)
+                )];
+                setFolders(prev => [...new Set(['All', ...uniqueFolders])]);
+
+            } else {
+                console.warn("API response successful but 'gpts' field is not an array or missing:", response.data);
+                setAssignedGpts([]);
+                setFolders(['All']);
+                setError("No collections found or received unexpected data format.");
+            }
+        } catch (error) {
+            console.error("Error fetching assigned GPTs:", error);
+            const errorMsg = error.response?.data?.message || "Failed to load your collections";
+            setError(errorMsg);
+            setAssignedGpts([]);
+            setFolders(['All']);
+        } finally {
+            setLoading(false);
         }
-    }, [user, loading]);
+    }, []);
     
-    const predefinedPrompts = [
-        {
-            id: 1,
-            title: 'Create an Agent',
-            prompt: 'I want to create a new AI agent for customer service tasks. What capabilities should I include?'
-        },
-        {
-            id: 2,
-            title: 'Configure Agent Settings',
-            prompt: 'Help me configure the response patterns and permissions for my marketing assistant agent.'
-        },
-        {
-            id: 3,
-            title: 'Agent Performance',
-            prompt: 'Can you show me analytics on how my support agents have been performing this month?'
-        },
-    ]
+    useEffect(() => {
+        fetchAssignedGpts();
+    }, [fetchAssignedGpts]);
 
-    const handlePromptClick = (item) => {
-        console.log("Prompt clicked:", item.prompt);
-        // TODO: Navigate to chat with this prompt
-    }
+    const handleClickOutside = useCallback((event) => {
+        if (sortDropdownRef.current && !sortDropdownRef.current.contains(event.target)) {
+            setShowSortOptions(false);
+        }
+        if (folderDropdownRef.current && !folderDropdownRef.current.contains(event.target)) {
+            setShowFolderOptions(false);
+        }
+    }, []);
 
-    const handleChatSubmit = (message) => {
-        console.log("Message submitted:", message);
-        // TODO: Navigate to chat with this message or handle inline chat
-    }
+    useEffect(() => {
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [handleClickOutside]);
     
-    const toggleProfile = () => {
-        setIsProfileOpen(!isProfileOpen);
+    const filteredGpts = useMemo(() => {
+        return assignedGpts
+            .filter(gpt => 
+                gpt.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                (gpt.description && gpt.description.toLowerCase().includes(searchTerm.toLowerCase()))
+            )
+            .filter(gpt => {
+                if (selectedFolder === 'All') return true;
+                return gpt.folder === selectedFolder;
+            })
+            .sort((a, b) => {
+                const dateA = a.assignedAt ? new Date(a.assignedAt) : new Date(0); 
+                const dateB = b.assignedAt ? new Date(b.assignedAt) : new Date(0);
+                const nameA = a.name || '';
+                const nameB = b.name || '';
+
+                switch (sortOption) {
+                    case 'newest': return dateB - dateA;
+                    case 'oldest': return dateA - dateB;
+                    case 'alphabetical': return nameA.localeCompare(nameB);
+                    default: return dateB - dateA;
+                }
+            });
+    }, [assignedGpts, searchTerm, sortOption, selectedFolder]);
+    
+    const formatDate = useCallback((dateString) => {
+        try {
+            const date = new Date(dateString);
+            if (isNaN(date.getTime())) {
+                 return 'Unknown Date';
+            }
+            return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        } catch (e) {
+            console.error("Error formatting date:", dateString, e);
+            return 'Unknown Date';
+        }
+    }, []);
+
+    const handleChatClick = useCallback(async (gptId) => {
+        if (!gptId) {
+            console.error("Invalid GPT ID");
+            toast.error("Cannot open chat: Invalid GPT ID.");
+            return;
+        }
+        
+        const selectedGpt = assignedGpts.find(gpt => gpt._id === gptId);
+        
+        if (!selectedGpt) {
+            console.warn(`GPT with ID ${gptId} not found in local state, navigating anyway.`);
+        } else {
+            try {
+                const backendUrl = import.meta.env.VITE_PYTHON_API_URL;
+                if (backendUrl) {
+                    const payload = {
+                        user_email: "user@example.com",
+                        gpt_name: selectedGpt.name || "Unknown GPT",
+                        gpt_id: selectedGpt._id,
+                        file_urls: selectedGpt.files || [],
+                        schema: {
+                            model: selectedGpt.model || "gpt-4o-mini"
+                        }
+                    };
+                    fetch(`${backendUrl}/gpt-opened`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    }).catch(err => console.warn("Failed to notify backend:", err));
+                }
+            } catch (err) {
+                console.warn("Error during pre-load notification:", err);
+            }
+        }
+        
+        navigate(`/user/chat?gptId=${gptId}`);
+    }, [navigate, assignedGpts]);
+    
+    const handleSearchChange = useCallback((e) => setSearchTerm(e.target.value), []);
+    const toggleSortOptions = useCallback(() => setShowSortOptions(prev => !prev), []);
+    const handleSortOptionSelect = useCallback((option) => {
+        setSortOption(option);
+        setShowSortOptions(false);
+    }, []);
+    
+    const handleRetry = useCallback(() => fetchAssignedGpts(), [fetchAssignedGpts]);
+    
+    const handleToggleFavorite = useCallback(async (gptId, isFavorite) => {
+        setAssignedGpts(prev => prev.map(gpt => 
+            gpt._id === gptId 
+                ? { ...gpt, isFavorite: !isFavorite }
+                : gpt
+        ));
+
+        try {
+            const endpoint = `/api/custom-gpts/user/favorites/${gptId}`;
+            if (isFavorite) {
+                await axiosInstance.delete(endpoint, { withCredentials: true });
+                toast.info("Removed from favorites");
+            } else {
+                await axiosInstance.post(endpoint, {}, { withCredentials: true });
+                toast.success("Added to favorites");
+            }
+        } catch (error) {
+            console.error("Error toggling favorite:", error);
+            toast.error(`Failed to ${isFavorite ? 'remove from' : 'add to'} favorites`);
+            setAssignedGpts(prev => prev.map(gpt => 
+                gpt._id === gptId 
+                    ? { ...gpt, isFavorite: isFavorite }
+                    : gpt
+            ));
+        }
+    }, []);
+    
+    const handleMoveToFolder = useCallback((gpt) => {
+        setGptToMove(gpt);
+        setShowMoveModal(true);
+    }, []);
+    
+    const handleGptMoved = useCallback((updatedGpt, newFolderName) => {
+        setAssignedGpts(prev => prev.map(gpt => 
+            gpt._id === updatedGpt._id 
+                ? updatedGpt 
+                : gpt
+        ));
+        
+        if (newFolderName && !folders.includes(newFolderName)) {
+            setFolders(prevFolders => [...new Set([...prevFolders, newFolderName])]);
+            setSelectedFolder(newFolderName);
+        } else if (updatedGpt.folder && updatedGpt.folder !== selectedFolder) {
+            setSelectedFolder(updatedGpt.folder);
+        } else if (!updatedGpt.folder && selectedFolder !== 'All') {
+            setSelectedFolder('All');
+        }
+
+        toast.success(`Moved "${updatedGpt.name}" to ${updatedGpt.folder || 'No Folder'}`);
+    }, [folders]);
+    
+    if (loading && assignedGpts.length === 0 && !error) {
+        return (
+            <div className={`flex items-center justify-center h-full ${isDarkMode ? 'bg-black text-white' : 'bg-gray-50 text-gray-700'}`}>
+                <div className={`animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 ${isDarkMode ? 'border-blue-500' : 'border-blue-600'}`}></div>
+            </div>
+        );
     }
-
-    const goToSettings = () => {
-        navigate('/user/settings'); // Navigate to settings page
-        setIsProfileOpen(false); // Close dropdown
-    };
-
-    const handleThemeToggle = () => {
-        toggleTheme();
-    }
-
-    // For development/testing only
-    const mockUser = {
-        name: "Test User",
-        email: "test@example.com",
-        profilePic: null
-    };
 
     return (
-        <div className={`flex flex-col items-center justify-center min-h-screen p-3 sm:p-5 md:p-8 w-full relative transition-colors duration-300 ${
-            isDarkMode ? 'bg-black text-white' : 'bg-gray-100 text-gray-900'
+        <div className={`flex flex-col h-full p-4 sm:p-6 overflow-hidden transition-colors duration-300 ${
+            isDarkMode ? 'bg-black text-white' : 'bg-gray-50 text-gray-900'
         }`}>
+            <div className="mb-4 md:mb-6 flex-shrink-0 text-center md:text-left">
+                <h1 className="text-xl sm:text-2xl font-bold">User Dashboard</h1>
+            </div>
             
-            {/* Container for Top Right Icons */}
-            <div className="absolute top-4 right-4 z-20 flex items-center space-x-3">
-                {/* Theme Toggle Button */}
-                <button 
-                    onClick={handleThemeToggle}
-                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${
-                        isDarkMode 
-                            ? 'bg-gray-800 hover:bg-gray-700 text-white border border-gray-700' 
-                            : 'bg-white hover:bg-gray-100 text-gray-800 border border-gray-200 shadow-sm'
-                    }`}
-                    aria-label={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
-                >
-                    {isDarkMode ? (
-                        <IoSunny size={20} className="text-amber-300" />
-                    ) : (
-                        <IoMoon size={20} className="text-blue-600" />
-                    )}
-                </button>
-
-                {/* Profile Button and Dropdown Area */}
-                <div className="relative"> 
-                    <button 
-                        onClick={toggleProfile}
-                        className={`w-10 h-10 rounded-full overflow-hidden border-2 transition-colors ${
-                            isDarkMode ? 'border-white/20 hover:border-white/40' : 'border-gray-300 hover:border-gray-500'
-                        }`}
-                    >
-                        {userData?.profilePic ? (
-                            <img 
-                                src={userData.profilePic} 
-                                alt="Profile" 
-                                className="w-full h-full object-cover"
-                            />
-                        ) : (
-                            <div className={`w-full h-full flex items-center justify-center ${isDarkMode ? 'bg-gray-700' : 'bg-gray-300'}`}>
-                                <IoPersonCircleOutline size={24} className={isDarkMode ? 'text-white' : 'text-gray-600'} />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 md:mb-6 gap-4 flex-shrink-0">
+                <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 flex-grow">
+                    <div className="relative flex-grow sm:flex-grow-0">
+                        <FiSearch className={`absolute left-3 top-1/2 transform -translate-y-1/2 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`} />
+                        <input
+                            type="text"
+                            placeholder="Search Collections..."
+                            value={searchTerm}
+                            onChange={handleSearchChange}
+                            className={`w-full sm:w-52 md:w-64 pl-10 pr-4 py-2 rounded-lg border focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-sm ${
+                            isDarkMode 
+                                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                            }`}
+                        />
+                    </div>
+                    
+                    <div className="relative" ref={folderDropdownRef}>
+                        <button 
+                            onClick={() => setShowFolderOptions(prev => !prev)}
+                            className={`flex items-center justify-between w-full sm:w-40 px-3 py-2 rounded-lg border text-sm transition-colors ${
+                            isDarkMode 
+                                ? 'bg-gray-700 border-gray-600 text-white hover:bg-gray-600' 
+                                : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                            }`}
+                        >
+                            <span className="truncate flex items-center gap-2">
+                                <FiFolder size={16} />
+                                {selectedFolder}
+                            </span>
+                            {showFolderOptions ? <FiChevronUp size={16}/> : <FiChevronDown size={16}/>}
+                        </button>
+                        
+                        {showFolderOptions && (
+                            <div className={`absolute z-10 w-full mt-1 rounded-lg shadow-lg border overflow-hidden text-sm max-h-60 overflow-y-auto ${
+                            isDarkMode 
+                                ? 'bg-gray-800 border-gray-700 text-white' 
+                                : 'bg-white border-gray-200 text-gray-700'
+                            }`}>
+                                 {folders.map((folder) => (
+                                    <button 
+                                        key={folder}
+                                        className={`block w-full text-left px-3 py-2 transition-colors flex items-center gap-2 ${
+                                        selectedFolder === folder 
+                                            ? (isDarkMode ? 'bg-blue-600' : 'bg-blue-100 text-blue-700 font-medium') 
+                                            : (isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100')
+                                        }`}
+                                        onClick={() => {
+                                            setSelectedFolder(folder);
+                                            setShowFolderOptions(false);
+                                        }}
+                                    >
+                                         <FiFolder size={14} />
+                                         {folder}
+                                    </button>
+                                ))}
                             </div>
                         )}
+                    </div>
+                </div>
+                
+                <div className="relative" ref={sortDropdownRef}>
+                    <button 
+                        onClick={toggleSortOptions}
+                        className={`flex items-center justify-between w-full sm:w-36 px-3 py-2 rounded-lg border text-sm transition-colors ${
+                            isDarkMode 
+                                ? 'bg-gray-700 border-gray-600 text-white hover:bg-gray-600' 
+                                : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                        }`}
+                    >
+                        <span className="truncate">Sort: {sortOption.charAt(0).toUpperCase() + sortOption.slice(1)}</span>
+                        {showSortOptions ? <FiChevronUp size={16}/> : <FiChevronDown size={16}/>}
                     </button>
                     
-                    {/* Profile Dropdown - positioned relative to the new inner div */}
-                    {isProfileOpen && (
-                        <div className={`absolute top-12 right-0 w-64 rounded-xl shadow-lg border overflow-hidden z-30 ${
-                            isDarkMode ? 'bg-[#1e1e1e] border-white/10' : 'bg-white border-gray-200'
+                    {showSortOptions && (
+                        <div className={`absolute z-10 w-full sm:w-36 mt-1 rounded-lg shadow-lg border overflow-hidden text-sm ${
+                            isDarkMode 
+                                ? 'bg-gray-800 border-gray-700 text-white' 
+                                : 'bg-white border-gray-200 text-gray-700'
                         }`}>
-                            <div className={`p-4 border-b ${isDarkMode ? 'border-white/10' : 'border-gray-200'}`}>
-                                <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                                    {userData?.name || mockUser.name}
-                                </p>
-                                <p className={`text-sm truncate ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                                    {userData?.email || mockUser.email}
-                                </p>
-                            </div>
-                            <div className="py-1">
-                                <button className={`w-full px-4 py-2.5 text-left flex items-center space-x-3 transition-colors ${
-                                    isDarkMode ? 'text-gray-300 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-100'
-                                }`}>
-                                    <IoPersonOutline size={18} />
-                                    <span>Profile</span>
-                                </button>
+                            {['newest', 'oldest', 'alphabetical'].map((optionValue) => (
                                 <button 
-                                    onClick={goToSettings} 
-                                    className={`w-full px-4 py-2.5 text-left flex items-center space-x-3 transition-colors ${
-                                        isDarkMode ? 'text-gray-300 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-100'
+                                    key={optionValue}
+                                    className={`block w-full text-left px-3 py-2 transition-colors ${
+                                        sortOption === optionValue 
+                                            ? (isDarkMode ? 'bg-blue-600' : 'bg-blue-100 text-blue-700 font-medium') 
+                                            : (isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100')
                                     }`}
+                                    onClick={() => handleSortOptionSelect(optionValue)}
                                 >
-                                    <IoSettingsOutline size={18} />
-                                    <span>Settings</span>
+                                    {optionValue.charAt(0).toUpperCase() + optionValue.slice(1)}
                                 </button>
-                            </div>
+                            ))}
                         </div>
                     )}
                 </div> 
             </div>
             
-            {/* Rest of the dashboard */}
-            <div className='text-center mb-6 sm:mb-8 md:mb-12 mt-16 md:mt-0 px-2'>
-                <h1 className={`text-2xl sm:text-3xl md:text-4xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Welcome to AI Agent</h1>
-                <span className={`text-base sm:text-lg md:text-xl font-medium mt-2 block ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>How can I assist you today?</span>
+            <div className="flex-1 overflow-y-auto pb-6 custom-scrollbar-dark dark:custom-scrollbar">
+                {error ? (
+                    <div className={`flex flex-col items-center justify-center h-full text-center ${isDarkMode ? 'text-red-400' : 'text-red-600'}`}>
+                        <FiXCircle size={40} className="mb-4 opacity-70"/>
+                        <p className="text-lg mb-4">{error}</p>
+                        <button
+                            onClick={handleRetry}
+                            className={`px-4 py-2 rounded-lg transition-colors text-white ${
+                                isDarkMode ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-500 hover:bg-blue-600'
+                            }`}
+                        >
+                            Try Again
+                        </button>
+                    </div>
+                ) : filteredGpts.length === 0 ? (
+                     <div className={`flex flex-col items-center justify-center h-full text-center ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                         <FiMessageSquare size={40} className="mb-4 opacity-50"/>
+                        <p className="text-lg mb-2">
+                            {searchTerm 
+                                ? `No collections matching "${searchTerm}" ${selectedFolder !== 'All' ? `in folder "${selectedFolder}"` : ''}`
+                                : selectedFolder !== 'All' 
+                                    ? `No GPTs in the "${selectedFolder}" folder` 
+                                    : "You don't have any collections assigned yet"
+                            }
+                        </p>
+                        <p className="text-sm">
+                            {selectedFolder !== 'All' && !searchTerm
+                                ? "Try selecting 'All' folders or contact your administrator."
+                                : "Assigned GPTs will appear here once assigned by an administrator."
+                            }
+                        </p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
+                        {filteredGpts.map(gpt => (
+                            <GptCard 
+                                key={gpt._id} 
+                                gpt={gpt} 
+                                formatDate={formatDate} 
+                                onChatClick={handleChatClick}
+                                onToggleFavorite={handleToggleFavorite}
+                                onMoveToFolder={handleMoveToFolder}
+                                isDarkMode={isDarkMode} 
+                            />
+                        ))}
+                    </div>
+                )}
             </div>
             
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-6 w-full max-w-xs sm:max-w-2xl lg:max-w-3xl xl:max-w-3xl px-2 sm:px-4">
-                {predefinedPrompts.map((item) => (
-                    <motion.div
-                        key={item.id}
-                        className={`group relative backdrop-blur-xl border rounded-xl p-3 cursor-pointer transition-all duration-150 text-left ${
-                            isDarkMode 
-                                ? 'bg-white/[0.05] border-white/20 hover:bg-white/[0.08] shadow-[0_0_15px_rgba(204,43,94,0.2)] hover:shadow-[0_0_20px_rgba(204,43,94,0.4)]' 
-                                : 'bg-white border-gray-200 hover:bg-gray-50 shadow-md hover:shadow-lg'
-                        }`}
-                        whileHover={{ scale: 1.03, transition: { duration: 0.15 } }}
-                        whileTap={{ scale: 0.98 }}
-                        onClick={() => handlePromptClick(item)}
-                    >
-                        <div className="relative z-10">
-                            <h3 className={`font-medium text-sm sm:text-base mb-1 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>{item.title}</h3>
-                            <p className={`text-xs sm:text-sm line-clamp-2 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>{item.prompt}</p>
-                        </div>
-                    </motion.div>
-                ))}
-            </div>
-            {/* Close profile dropdown when clicking outside */}
-            {isProfileOpen && (
-                <div 
-                    className="fixed inset-0 z-10" 
-                    onClick={() => setIsProfileOpen(false)}
+            {showMoveModal && gptToMove && (
+                <MoveToFolderModal
+                    isOpen={showMoveModal}
+                    onClose={() => { setShowMoveModal(false); setGptToMove(null); }}
+                    gpt={gptToMove}
+                    existingFolders={folders.filter(f => f !== 'All')}
+                    onSuccess={handleGptMoved}
                 />
             )}
         </div>
-    )
-}
+    );
+};
 
 export default UserDashboard;
-
-

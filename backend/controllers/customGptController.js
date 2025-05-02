@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const UserGptAssignment = require('../models/UserGptAssignment');
 const User = require('../models/User');
+const UserFavorite = require('../models/UserFavorite');
 
 
 // Configure multer for memory storage
@@ -462,18 +463,32 @@ const getUserAssignedGpts = async (req, res) => {
     const gpts = await CustomGpt.find({ _id: { $in: gptIds } }).lean();
     console.log(`Found ${gpts.length} GPTs from ${gptIds.length} assignments`);
     
-    // Add assignment dates to each GPT
-    const gptsWithDates = gpts.map(gpt => {
+    // Add assignment dates and folder to each GPT
+    const gptsWithDetails = gpts.map(gpt => {
       const assignment = assignments.find(a => a.gptId.toString() === gpt._id.toString());
       return {
         ...gpt,
-        assignedAt: assignment?.createdAt || new Date()
+        assignedAt: assignment?.createdAt || new Date(),
+        folder: assignment?.folder || null
+      };
+    });
+    
+    // Get user's favorites to mark the favorite GPTs
+    const userFavorites = await UserFavorite.find({ user: userId }).distinct('gpt');
+    
+    // Add isFavorite flag to each GPT
+    const gptsWithFavorites = gptsWithDetails.map(gpt => {
+      return {
+        ...gpt,
+        isFavorite: userFavorites.some(favId => 
+          favId.toString() === gpt._id.toString()
+        )
       };
     });
     
     return res.status(200).json({
       success: true,
-      gpts: gptsWithDates
+      gpts: gptsWithFavorites
     });
   } catch (error) {
     console.error(`Error in getUserAssignedGpts: ${error.message}`);
@@ -730,6 +745,194 @@ const updateGptFolder = async (req, res) => {
   }
 };
 
+// Get user's favorite GPTs
+const getUserFavorites = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        
+        // Find all favorites for this user
+        const favorites = await UserFavorite.find({ user: userId })
+            .populate({
+                path: 'gpt',
+                // Select necessary fields, potentially removing assignedAt if it's not directly on CustomGpt
+                select: 'name description model imageUrl capabilities files' 
+            })
+            .lean(); // Use lean for better performance
+
+        if (!favorites.length) {
+            return res.status(200).json({ success: true, gpts: [] });
+        }
+        
+        // Get GPT IDs from favorites
+        const gptIds = favorites.map(fav => fav.gpt._id);
+        
+        // Find the corresponding assignments to get folder info
+        const assignments = await UserGptAssignment.find({ 
+            userId: userId, 
+            gptId: { $in: gptIds } 
+        }).lean();
+        
+        // Create a map for easy lookup: gptId -> folder
+        const assignmentFolderMap = assignments.reduce((map, assignment) => {
+            map[assignment.gptId.toString()] = assignment.folder || null;
+            return map;
+        }, {});
+
+        // Extract the GPT data and add folder info
+        const gpts = favorites.map(fav => {
+            const gptObject = fav.gpt; // Already a plain object due to .lean()
+            gptObject.isFavorite = true;
+            // Assign folder from the map, default to null if not found (shouldn't happen ideally)
+            gptObject.folder = assignmentFolderMap[gptObject._id.toString()] || null; 
+            // Note: You might want createdAt from the favorite record, not the GPT itself
+            gptObject.createdAt = fav.createdAt; // Use favorite creation date
+            return gptObject;
+        });
+        
+        return res.status(200).json({
+            success: true,
+            gpts
+        });
+    } catch (error) {
+        console.error('Error fetching user favorites:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch favorite GPTs',
+            error: error.message
+        });
+    }
+};
+
+// Add a GPT to user's favorites
+const addToFavorites = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { gptId } = req.params;
+        
+        // Check if the GPT exists and is assigned to the user
+        const isAssigned = await UserGptAssignment.exists({ 
+            userId: userId,
+            gptId: gptId
+        });
+        
+        if (!isAssigned) {
+            return res.status(404).json({
+                success: false,
+                message: 'GPT not found or not assigned to you'
+            });
+        }
+        
+        // Create a new favorite (the unique index will prevent duplicates)
+        await UserFavorite.create({
+            user: userId,
+            gpt: gptId
+        });
+        
+        return res.status(201).json({
+            success: true,
+            message: 'GPT added to favorites'
+        });
+    } catch (error) {
+        // If it's a duplicate key error, just return success
+        if (error.code === 11000) {
+            return res.status(200).json({
+                success: true,
+                message: 'GPT is already in favorites'
+            });
+        }
+        
+        console.error('Error adding to favorites:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to add GPT to favorites',
+            error: error.message
+        });
+    }
+};
+
+// Remove a GPT from user's favorites
+const removeFromFavorites = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { gptId } = req.params;
+        
+        // Delete the favorite
+        const result = await UserFavorite.deleteOne({
+            user: userId,
+            gpt: gptId
+        });
+        
+        if (result.deletedCount === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'GPT not found in favorites'
+            });
+        }
+        
+        return res.status(200).json({
+            success: true,
+            message: 'GPT removed from favorites'
+        });
+    } catch (error) {
+        console.error('Error removing from favorites:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to remove GPT from favorites',
+            error: error.message
+        });
+    }
+};
+
+// Update GPT folder for user assignment
+const updateUserGptFolder = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { gptId } = req.params;
+    const { folder } = req.body; // folder can be a string or null/undefined
+
+    // Validate folder name slightly (optional, prevent overly long names etc.)
+    if (folder && typeof folder === 'string' && folder.length > 100) {
+      return res.status(400).json({
+        success: false,
+        message: 'Folder name is too long (max 100 characters).'
+      });
+    }
+
+    // Find the assignment
+    const assignment = await UserGptAssignment.findOne({ 
+      userId: userId, 
+      gptId: gptId 
+    });
+
+    if (!assignment) {
+      return res.status(404).json({
+        success: false,
+        message: 'GPT assignment not found'
+      });
+    }
+
+    // Update the folder - set to null if folder is null/empty string, otherwise use the string
+    assignment.folder = folder || null;
+    await assignment.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Folder updated successfully',
+      assignment: {
+        gptId: assignment.gptId,
+        folder: assignment.folder
+      }
+    });
+  } catch (error) {
+    console.error('Error updating assignment folder:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update folder',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   createCustomGpt,
   getUserCustomGpts,
@@ -744,5 +947,9 @@ module.exports = {
   unassignGptFromUser,
   getUserGptCount,
   getAssignedGptById,
-  updateGptFolder
+  updateGptFolder,
+  getUserFavorites,
+  addToFavorites,
+  removeFromFavorites,
+  updateUserGptFolder
 }; 

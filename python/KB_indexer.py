@@ -640,21 +640,28 @@ Please note that I don't have sufficient information to provide a proper answer 
                 # Initialize api_url, headers, and payload with default values
                 api_url = None  # Will be set based on provider
                 headers = {"Content-Type": "application/json"}
-                payload = {
-                    "model": model,
-                    "messages": messages,
-                    "stream": True,
-                    "temperature": 0.7
-                }
+                payload = {}
 
                 # Set provider-specific configurations
                 if provider == "openai":
                     api_url = "https://api.openai.com/v1/chat/completions"
                     headers["Authorization"] = f"Bearer {model_api_key}"
+                    payload = {
+                        "model": model,
+                        "messages": messages,
+                        "stream": True,
+                        "temperature": 0.7
+                    }
                     
                 elif provider == "groq":
                     api_url = "https://api.groq.com/openai/v1/chat/completions"
                     headers["Authorization"] = f"Bearer {model_api_key}"
+                    payload = {
+                        "model": model,
+                        "messages": messages,
+                        "stream": True,
+                        "temperature": 0.7
+                    }
                     
                 elif provider == "anthropic":
                     # Anthropic API implementation would go here
@@ -664,11 +671,45 @@ Please note that I don't have sufficient information to provide a proper answer 
                     return
                     
                 elif provider == "google":
-                    # Google Gemini API implementation would go here
-                    logger.error(f"Google Gemini streaming is not yet implemented.")
-                    yield f"data: {json.dumps({'error': 'Google Gemini streaming not implemented'})}\n\n" 
-                    yield f"data: {json.dumps({'done': True})}\n\n"
-                    return
+                    # Implement Google Gemini API streaming
+                    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?key={model_api_key}"
+                    
+                    # Convert messages from OpenAI format to Gemini format
+                    gemini_messages = []
+                    for msg in messages:
+                        role = msg.get("role", "user")
+                        content = msg.get("content", "")
+                        
+                        # Map OpenAI roles to Gemini roles
+                        if role == "system":
+                            # System prompts in Gemini go as user messages with a prefix
+                            gemini_messages.append({
+                                "role": "user", 
+                                "parts": [{"text": f"System instruction: {content}"}]
+                            })
+                        elif role == "user":
+                            gemini_messages.append({
+                                "role": "user", 
+                                "parts": [{"text": content}]
+                            })
+                        elif role == "assistant":
+                            gemini_messages.append({
+                                "role": "model", 
+                                "parts": [{"text": content}]
+                            })
+                    
+                    # Gemini payload format
+                    payload = {
+                        "contents": gemini_messages,
+                        "generationConfig": {
+                            "temperature": 0.7,
+                            "topP": 0.95,
+                            "topK": 40
+                        }
+                    }
+                    
+                    # For debugging
+                    logger.info(f"Using Gemini API with URL: {api_url}")
                 
                 else:
                     # Handle unknown provider
@@ -686,44 +727,72 @@ Please note that I don't have sufficient information to provide a proper answer 
                     yield f"data: {json.dumps({'done': True})}\n\n"
                     return
                     
-                logger.info(f"Making stream request to {api_url} for model {model}")
+                logger.info(f"Making stream request to {api_url}")
 
-                async with session.post(api_url, headers=headers, json=payload) as response:
-                    if not response.ok:
-                        error_content = await response.text()
-                        error_msg = f"Error from {provider} API: {response.status} - {error_content}"
-                        logger.error(error_msg)
-                        yield f"data: {json.dumps({'error': error_msg})}\n\n"
-                        yield f"data: {json.dumps({'done': True})}\n\n"
-                        return
+                try:
+                    async with session.post(api_url, headers=headers, json=payload) as response:
+                        if not response.ok:
+                            error_content = await response.text()
+                            error_msg = f"Error from {provider} API: {response.status} - {error_content}"
+                            logger.error(error_msg)
+                            yield f"data: {json.dumps({'error': error_msg})}\n\n"
+                            yield f"data: {json.dumps({'done': True})}\n\n"
+                            return
                         
-                    # Common response parsing for OpenAI-compatible APIs (OpenAI, Groq)
-                    if provider in ["openai", "groq"]:
-                        async for line in response.content:
-                            if line:
-                                line_text = line.decode('utf-8').strip()
-                                if line_text.startswith("data: "):
-                                    if line_text == "data: [DONE]":
-                                        yield f"data: {json.dumps({'done': True})}\n\n"
-                                        break
+                        # Parse responses based on provider
+                        if provider in ["openai", "groq"]:
+                            # OpenAI-compatible streaming format
+                            async for line in response.content:
+                                if line:
+                                    line_text = line.decode('utf-8').strip()
+                                    if line_text.startswith("data: "):
+                                        if line_text == "data: [DONE]":
+                                            yield f"data: {json.dumps({'done': True})}\n\n"
+                                            break
+                                            
+                                        # Skip empty data lines
+                                        if line_text == "data: ":
+                                            continue
                                         
-                                    # Skip empty lines
-                                    if line_text == "data: ":
-                                        continue
-                                    
-                                    data_json = line_text[6:]  # Remove "data: " prefix
-                                    try:
-                                        data = json.loads(data_json)
-                                        if "choices" in data and len(data["choices"]) > 0:
-                                            choice = data["choices"][0]
-                                            if "delta" in choice and "content" in choice["delta"]:
-                                                content = choice["delta"]["content"]
-                                                if content:
-                                                    # Forward the content chunk directly to the client
-                                                    yield f"data: {json.dumps({'content': content})}\n\n"
-                                    except json.JSONDecodeError:
-                                        logger.warning(f"Failed to parse SSE data: {data_json}")
-                                        continue
+                                        try:
+                                            data_json = line_text[6:]  # Remove "data: " prefix
+                                            data = json.loads(data_json)
+                                            if "choices" in data and len(data["choices"]) > 0:
+                                                choice = data["choices"][0]
+                                                if "delta" in choice and "content" in choice["delta"]:
+                                                    content = choice["delta"]["content"]
+                                                    if content:
+                                                        # Forward content chunk to client
+                                                        yield f"data: {json.dumps({'content': content})}\n\n"
+                                        except json.JSONDecodeError:
+                                            logger.warning(f"Failed to parse SSE data: {line_text}")
+                                            continue
+                                        
+                        elif provider == "google":
+                            # Google Gemini API format is different - returns a JSON array not SSE
+                            response_data = await response.json()
+                            
+                            if "candidates" in response_data and len(response_data["candidates"]) > 0:
+                                candidate = response_data["candidates"][0]
+                                if "content" in candidate and "parts" in candidate["content"]:
+                                    parts = candidate["content"]["parts"]
+                                    for part in parts:
+                                        if "text" in part:
+                                            # Split into smaller chunks for streaming feel
+                                            text = part["text"]
+                                            # Send in smaller chunks (sentences or paragraphs)
+                                            chunks = [s.strip() + " " for s in text.split(".") if s.strip()]
+                                            for chunk in chunks:
+                                                yield f"data: {json.dumps({'content': chunk})}\n\n"
+                                                await asyncio.sleep(0.1)  # Small delay for streaming feel
+                            
+                            # Signal completion
+                            yield f"data: {json.dumps({'done': True})}\n\n"
+                            
+                except Exception as e:
+                    logger.error(f"Error in streaming request: {str(e)}")
+                    yield f"data: {json.dumps({'error': f'Error: {str(e)}'})}\n\n"
+                    yield f"data: {json.dumps({'done': True})}\n\n"
 
         return StreamingResponse(streaming_response(), media_type="text/event-stream")
     except Exception as e:

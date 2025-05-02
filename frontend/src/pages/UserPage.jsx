@@ -2,14 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import Sidebar from '../components/User/Sidebar';
 import UserDashboard from '../components/User/UserDashboard';
-import CollectionsPage from '../components/User/CollectionsPage';
 import FavoritesPage from '../components/User/FavoritesPage';
 import HistoryPage from '../components/User/HistoryPage';
 import SettingsPage from '../components/User/SettingsPage';
 import UserChat from '../components/User/UserChat';
 
 // Placeholder components for other pages
-const Collections = () => <div className="p-4 sm:p-8 text-white mt-16 md:mt-0"><h1 className="text-2xl">Collections Page</h1></div>;
 const Favourites = () => <div className="p-4 sm:p-8 text-white mt-16 md:mt-0"><h1 className="text-2xl">Favourites Page</h1></div>;
 const History = () => <div className="p-4 sm:p-8 text-white mt-16 md:mt-0"><h1 className="text-2xl">History Page</h1></div>;
 
@@ -36,7 +34,7 @@ const Layout = () => {
   useEffect(() => {
     if (gptId) {
     } else {
-        const validPages = ['dashboard', 'collections', 'favourites', 'history', 'settings'];
+        const validPages = ['dashboard','favourites', 'history', 'settings'];
         if (!validPages.includes(currentPage)) {
             setCurrentPage('dashboard');
         }
@@ -61,8 +59,6 @@ const Layout = () => {
     switch(currentPage) {
       case 'dashboard':
         return <UserDashboard />;
-      case 'collections':
-        return <CollectionsPage />;
       case 'favourites':
         return <FavoritesPage />;
       case 'history':

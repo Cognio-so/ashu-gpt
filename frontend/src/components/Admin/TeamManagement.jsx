@@ -477,7 +477,7 @@ const TeamManagement = () => {
                                 {pendingInvitesCount}
                             </span>
                         )}
-                                                                </button>
+                    </button>
                 </div>
             </div>
             
