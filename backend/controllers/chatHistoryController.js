@@ -5,7 +5,6 @@ exports.saveMessage = async (req, res) => {
     try {
         const { userId, gptId, gptName, message, role, model } = req.body;
         
-        console.log('Saving message to DB:', { userId, gptId, role, messageLength: message?.length });
 
         if (!userId || !gptId || !message || !role) {
             return res.status(400).json({ 
@@ -17,7 +16,6 @@ exports.saveMessage = async (req, res) => {
 
         // Find existing conversation or create new one
         let conversation = await ChatHistory.findOne({ userId, gptId });
-        console.log('Found existing conversation:', !!conversation);
         
         if (!conversation) {
             conversation = new ChatHistory({
@@ -28,7 +26,6 @@ exports.saveMessage = async (req, res) => {
                 messages: [],
                 lastMessage: ''
             });
-            console.log('Created new conversation');
         }
 
         // Add new message
@@ -37,7 +34,6 @@ exports.saveMessage = async (req, res) => {
             content: message,
             timestamp: new Date()
         });
-        console.log(`Added ${role} message to conversation`);
 
         // Update last message (always update for display purposes)
         if (role === 'user') {
@@ -46,7 +42,6 @@ exports.saveMessage = async (req, res) => {
         
         conversation.updatedAt = new Date();
         const savedConversation = await conversation.save();
-        console.log('Conversation saved with message count:', savedConversation.messages.length);
 
         res.json({ 
             success: true, 

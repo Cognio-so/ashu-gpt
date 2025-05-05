@@ -433,7 +433,6 @@ When providing code examples:
             );
             
             if (response.data.success) {
-                console.log(`KB indexing completed for collection: ${response.data.collection_name}`);
                 toast.success("Knowledge files indexed successfully");
             } else {
                 console.error("KB indexing failed");

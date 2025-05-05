@@ -173,7 +173,6 @@ const TeamManagement = () => {
     const handleGptAssignmentChange = useCallback((memberId) => {
         // Convert to standard pattern if it's a MongoDB ObjectId string
         if (typeof memberId === 'string' && /^[0-9a-fA-F]{24}$/.test(memberId)) {
-            console.log("Valid MongoDB ObjectId detected:", memberId);
         } else if (typeof memberId !== 'string') {
             console.error("Invalid member ID type:", typeof memberId);
             return;
@@ -181,7 +180,6 @@ const TeamManagement = () => {
         
         const fetchUpdatedCount = async () => {
             try {
-                console.log("Fetching updated GPT count for member:", memberId);
                 
                 // Get the updated count for this user
                 const response = await axiosInstance.get(`/api/auth/users/${memberId}/gpt-count`, { 
@@ -189,7 +187,6 @@ const TeamManagement = () => {
                 });
                 
                 if (response.data && typeof response.data.count !== 'undefined') {
-                    console.log(`User ${memberId} now has ${response.data.count} GPTs assigned`);
                     
                     // Update this member's GPT count in the state
                     setTeamMembers(prev => prev.map(member => 

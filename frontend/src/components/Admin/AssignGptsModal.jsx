@@ -81,9 +81,6 @@ const AssignGptsModal = ({ isOpen, onClose, teamMember, onAssignmentChange }) =>
             const idsToAssign = [...finalSelectedIds].filter(id => !initialAssignedIds.has(id));
             const idsToUnassign = [...initialAssignedIds].filter(id => !finalSelectedIds.has(id));
 
-            console.log("Team member ID:", teamMember.id);
-            console.log("IDs to assign:", idsToAssign);
-            console.log("IDs to unassign:", idsToUnassign);
 
             // Process assignments one by one instead of using Promise.all
             for (const gptId of idsToAssign) {
@@ -99,7 +96,6 @@ const AssignGptsModal = ({ isOpen, onClose, teamMember, onAssignmentChange }) =>
                             }
                         }
                     );
-                    console.log(`Successfully assigned GPT ${gptId}`);
                 } catch (err) {
                     console.error(`Failed to assign GPT ${gptId}:`, err.response?.data || err.message);
                     errors.push({ type: 'assign', gptId, error: err.response?.data?.message || err.message });
@@ -113,7 +109,6 @@ const AssignGptsModal = ({ isOpen, onClose, teamMember, onAssignmentChange }) =>
                         `/api/custom-gpts/team/members/${teamMember.id}/gpts/${gptId}`,
                         { withCredentials: true }
                     );
-                    console.log(`Successfully unassigned GPT ${gptId}`);
                 } catch (err) {
                     console.error(`Failed to unassign GPT ${gptId}:`, err.response?.data || err.message);
                     errors.push({ type: 'unassign', gptId, error: err.response?.data?.message || err.message });

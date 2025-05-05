@@ -66,7 +66,6 @@ const UserChat = () => {
         // --- Step 2: Wait for Authentication to Settle ---
         // If authentication is still loading, do nothing yet. Show loading indicator.
         if (authLoading) {
-            console.log("Auth loading, waiting...");
             setIsInitialLoading(true); // Keep showing loading while waiting
             return;
         }
@@ -84,8 +83,7 @@ const UserChat = () => {
 
         // --- Step 4: Conditions Met - Proceed with Fetch ---
         // If we reach here: gptId exists, authLoading is false, and user exists.
-        console.log("Conditions met (gptId, user loaded). Starting fetchInitialData.");
-        setIsInitialLoading(true); // Ensure loading is true before fetch starts
+            setIsInitialLoading(true); // Ensure loading is true before fetch starts
 
         const fromHistory = location.state?.fromHistory || location.search.includes('loadHistory=true');
 
@@ -97,13 +95,11 @@ const UserChat = () => {
 
             try {
                 // Fetch GPT Data
-                console.log("[fetchInitialData] Fetching GPT data for:", gptId);
                 const gptResponse = await axiosInstance.get(`/api/custom-gpts/user/assigned/${gptId}`, { withCredentials: true });
 
                 if (gptResponse.data?.success && gptResponse.data.customGpt) {
                     fetchedGptData = gptResponse.data.customGpt;
                     gptDataIdToLoad = fetchedGptData._id;
-                    console.log("[fetchInitialData] GPT data fetched:", fetchedGptData.name);
                 } else {
                     console.warn("[fetchInitialData] Failed GPT fetch:", gptResponse.data);
                     fetchedGptData = { _id: gptId, name: "GPT Assistant", description: "Assistant details unavailable.", model: "gpt-4o-mini" };
@@ -118,7 +114,6 @@ const UserChat = () => {
 
                 // Load History if needed
                 if (fromHistory) {
-                    console.log("[fetchInitialData] Loading history for GPT ID:", gptDataIdToLoad);
                     const historyResponse = await axiosInstance.get(`/api/chat-history/conversation/${user._id}/${gptDataIdToLoad}`, { withCredentials: true });
 
                     if (historyResponse.data?.success && historyResponse.data.conversation?.messages?.length > 0) {
@@ -135,9 +130,7 @@ const UserChat = () => {
                             content: msg.content,
                             timestamp: msg.timestamp || conversation.createdAt
                         }));
-                        console.log(`[fetchInitialData] Loaded ${historyMessages.length} messages from history.`);
                     } else {
-                        console.log("[fetchInitialData] No history found or history load failed.");
                         historyMessages = [];
                         historyMemory = [];
                     }
@@ -149,7 +142,6 @@ const UserChat = () => {
                 // Set Messages & Memory *after* all fetches are done
                 setMessages(historyMessages);
                 setConversationMemory(historyMemory);
-                console.log("[fetchInitialData] Messages and memory state updated.");
 
             } catch (err) {
                 console.error("[fetchInitialData] Error during fetch:", err);
@@ -159,7 +151,6 @@ const UserChat = () => {
                 setConversationMemory([]);
             } finally {
                 // Mark initial loading complete *only* after try/catch finishes
-                console.log("[fetchInitialData] Process complete. Setting isInitialLoading to false.");
                 setIsInitialLoading(false);
             }
         };
@@ -168,7 +159,6 @@ const UserChat = () => {
 
         // Cleanup function: Reset loading states if dependencies change mid-fetch
         return () => {
-            console.log("useEffect cleanup: Resetting loading states.");
             setIsInitialLoading(false);
             setLoading(prev => ({ ...prev, gpt: false, history: false })); // Clear old flags too
         };
@@ -210,7 +200,7 @@ const UserChat = () => {
                 return null;
             }
 
-            console.log(`Attempting to save ${role} message to history:`, message.substring(0, 30) + '...');
+           
             
             const payload = {
                 userId: user._id,
@@ -221,13 +211,11 @@ const UserChat = () => {
                 model: gptData.model || 'gpt-4o-mini'
             };
             
-            console.log('Save message payload:', payload);
 
             const response = await axiosInstance.post('/api/chat-history/save', payload, {
                 withCredentials: true
             });
 
-            console.log(`${role.toUpperCase()} message saved successfully:`, response.data);
             return response.data;
         } catch (error) {
             console.error(`Error saving ${role} message to history:`, error.response?.data || error.message);
@@ -293,7 +281,6 @@ const UserChat = () => {
                 use_hybrid_search: gptData?.capabilities?.hybridSearch || false // Default to false if not set
             };
             
-            console.log("Sending to /chat-stream:", payload);
 
             const response = await fetch(`${pythonApiUrl}/chat-stream`, {
                 method: 'POST',
@@ -351,14 +338,12 @@ const UserChat = () => {
         let buffer = ""; // Accumulates the full response content
         let doneStreaming = false;
 
-        console.log(`[Stream ${messageId}] Starting to read stream.`);
 
         try {
             while (!doneStreaming) {
                 const { done, value } = await reader.read();
                 
                 if (done) {
-                    console.log(`[Stream ${messageId}] Stream finished.`);
                     doneStreaming = true;
                     break; // Exit the loop
                 }
@@ -382,7 +367,6 @@ const UserChat = () => {
                             }
                             
                             if (parsed.done === true) {
-                            console.log(`[Stream ${messageId}] Done signal received.`);
                             doneStreaming = true; // Mark as done
                             break; // Stop processing lines for this chunk
                             }
@@ -402,7 +386,6 @@ const UserChat = () => {
             } // end while loop reading stream
 
             // --- Final Update After Stream Ends ---
-            console.log(`[Stream ${messageId}] Finalizing state. Full content length: ${buffer.length}`);
             setMessages(prev => prev.map(msg => 
                 msg.id === messageId 
                 ? { 
@@ -418,7 +401,6 @@ const UserChat = () => {
             // Save the final content (or error) to history
             if (buffer || messages.find(m => m.id === messageId)?.isError) {
                  await saveMessageToHistory(buffer || messages.find(m => m.id === messageId)?.content, 'assistant');
-                 console.log(`[Stream ${messageId}] Final message saved to history.`);
             } else {
                  console.warn(`[Stream ${messageId}] No final content buffer to save.`);
             }
@@ -433,7 +415,6 @@ const UserChat = () => {
             ));
              await saveMessageToHistory("Error reading response stream.", 'assistant'); // Save error
         } finally {
-            console.log(`[Stream ${messageId}] Cleaning up. Setting loading to false.`);
             setLoading(prev => ({ ...prev, message: false })); // Ensure loading always stops
         }
     };
@@ -484,7 +465,6 @@ const UserChat = () => {
                 }
             };
             
-            console.log("Sending GPT opened notification with system prompt:", payload.schema.instructions?.substring(0, 50) + "...");
             
             const response = await fetch(`${backendUrl}/gpt-opened`, {
                 method: 'POST',
@@ -496,7 +476,6 @@ const UserChat = () => {
             
             if (response.ok) {
                 const data = await response.json();
-                console.log("GPT opened notification successful");
                 
                 // Store the collection name if provided
                 if (data && data.collection_name) {
@@ -609,10 +588,6 @@ const UserChat = () => {
                     setUserDocuments(prev => [...prev, ...response.data.file_urls]);
                 }
                 
-                // Don't add system message for file uploads - silently process in the background
-                console.log(`✅ ${validFiles.length} file(s) uploaded${response.data.processing ? ' and processing...' : ' successfully!'}`);
-                
-                // Show uploaded files in the UI
                 setUploadedFiles(prev => [
                     ...prev,
                     ...validFiles.map(file => ({
@@ -654,9 +629,6 @@ const UserChat = () => {
                             file.status === 'processing' ? {...file, status: 'ready'} : file
                         )
                     );
-                    
-                    // Silently complete processing without adding system message
-                    console.log('✅ File processing completed. All files ready for queries.');
                     
                     clearInterval(statusCheck);
                 } else if (response.data.status === 'failed') {

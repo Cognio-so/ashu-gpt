@@ -204,7 +204,6 @@ const googleAuthCallback = (req, res, next) => {
         feRedirectUrl.searchParams.set('user', JSON.stringify(userData));
 
         // Log successful authentication
-        console.log("Google auth successful, redirecting to:", feRedirectUrl.toString());
         return res.redirect(feRedirectUrl.toString());
 
     } catch (error) {
@@ -259,7 +258,7 @@ const getCurrentUser = async (req, res) => {
         // req.user is populated by protectRoute middleware (using access token)
         const userId = req.user._id;
 
-        const user = await User.findById(userId);
+        const user = await User.findOne({email: req.user.email});
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
@@ -298,83 +297,52 @@ const getAllUsers = async (req, res) => {
         res.status(500).json({ message: error.message });
     }
 };
-
 const removeTeamMember = async (req, res) => {
     try {
         const { userId } = req.params;
         
-        // Verify user is an admin
+        // Verify admin role
         if (req.user.role !== 'admin') {
-            return res.status(403).json({ 
-                success: false, 
-                message: 'Only admins can remove team members' 
-            });
+            return res.status(403).json({ success: false, message: 'Only admins can remove team members' });
         }
-        
+
         // Check if user exists
         const user = await User.findById(userId);
         if (!user) {
-            return res.status(404).json({ 
-                success: false, 
-                message: 'User not found' 
-            });
+            return res.status(404).json({ success: false, message: 'User not found' });
         }
-        
-        // Start a session for transaction
+
         const session = await mongoose.startSession();
-        session.startTransaction();
-        
         try {
-            // Log what we're deleting to debug
-            console.log(`Deleting chat history for user ${userId}`);
-            
-            // Check and log chat history count before deletion
-            const chatHistoryCount = await ChatHistory.countDocuments({ userId });
-            console.log(`Found ${chatHistoryCount} chat history records for user ${userId}`);
-            
-            // Delete all associated data - don't use the session initially to isolate issues
-            // 1. Delete user's chat history
-            const chatResult = await ChatHistory.deleteMany({ userId });
-            console.log(`ChatHistory deletion result: ${JSON.stringify(chatResult)}`);
-            
-            // 2. Delete user's GPT assignments
-            const gptResult = await UserGptAssignment.deleteMany({ userId });
-            console.log(`UserGptAssignment deletion result: ${JSON.stringify(gptResult)}`);
-            
-            // 3. Delete user's favorites
-            const favResult = await UserFavorite.deleteMany({ userId });
-            console.log(`UserFavorite deletion result: ${JSON.stringify(favResult)}`);
-            
-            // 4. Finally, delete the user
-            const userResult = await User.findByIdAndDelete(userId);
-            console.log(`User deletion result: ${userResult ? 'Success' : 'Failed'}`);
-            
-            // Commit the transaction
-            await session.commitTransaction();
-            session.endSession();
-            
-            return res.status(200).json({ 
-                success: true, 
-                message: 'User and all associated data removed successfully',
-                deletionResults: {
-                    chatHistory: chatResult,
-                    gptAssignments: gptResult,
-                    favorites: favResult,
-                    user: !!userResult
-                }
+            await session.withTransaction(async () => {
+                // Delete all associated data in parallel
+                const [chatResult, gptResult, favResult, userResult] = await Promise.all([
+                    ChatHistory.deleteMany({ userId }).session(session),
+                    UserGptAssignment.deleteMany({ userId }).session(session),
+                    UserFavorite.deleteMany({ userId }).session(session),
+                    User.findByIdAndDelete(userId).session(session)
+                ]);
+
+                return res.status(200).json({
+                    success: true,
+                    message: 'User and all associated data removed successfully',
+                    deletionResults: {
+                        chatHistory: chatResult,
+                        gptAssignments: gptResult,
+                        favorites: favResult,
+                        user: !!userResult
+                    }
+                });
             });
-        } catch (error) {
-            // If any operation fails, abort the transaction
-            await session.abortTransaction();
+        } finally {
             session.endSession();
-            throw error;
         }
     } catch (error) {
         console.error('Error removing team member:', error);
-        return res.status(500).json({ 
-            success: false, 
-            message: 'Failed to remove team member', 
-            error: error.message 
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to remove team member',
+            error: error.message
         });
     }
 };
@@ -388,12 +356,10 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-// Send invitation to a new team member
 const inviteTeamMember = async (req, res) => {
   try {
     const { email, role } = req.body;
     
-    // Verify the current user is an admin
     if (!req.user || req.user.role !== 'admin') {
       return res.status(403).json({ 
         success: false, 
@@ -471,38 +437,6 @@ const inviteTeamMember = async (req, res) => {
   }
 };
 
-/**
- * Get count of pending invitations
- * @route GET /api/auth/pending-invites/count
- * @access Private (Admin only)
- */
-const getPendingInvitesCount = async (req, res) => {
-  try {
-    // Verify the current user is an admin
-    if (!req.user || req.user.role !== 'admin') {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'Only admins can view pending invitations' 
-      });
-    }
-    
-    const count = await Invitation.countDocuments({ 
-      status: 'pending',
-      expiresAt: { $gt: new Date() }
-    });
-    
-    return res.status(200).json({
-      success: true,
-      count
-    });
-  } catch (error) {
-    console.error('Error getting pending invites count:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Error getting pending invites count'
-    });
-  }
-};
 
 // Add this new function to set user as inactive
 const setInactive = async (req, res) => {
@@ -525,61 +459,53 @@ const setInactive = async (req, res) => {
 // Get users with GPT counts in one call
 const getUsersWithGptCounts = async (req, res) => {
     try {
-        // Only admin should be able to get all users
-        if (req.user.role !== 'admin') {
-            return res.status(403).json({ message: 'Not authorized to access this resource' });
-        }
-        
-        // Get pagination parameters
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
-        const skip = (page - 1) * limit;
-        
-        // Get total count first - excluding the current user
-        const total = await User.countDocuments({ _id: { $ne: req.user._id } });
-        
-        // Get users with pagination - excluding the current user
-        const users = await User.find({ _id: { $ne: req.user._id } })
-            .select('-password')
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(limit);
-            
-        // Get GPT counts in one query
-        const assignments = await UserGptAssignment.aggregate([
-            {
-                $group: {
-                    _id: '$userId',
-                    count: { $sum: 1 }
-                }
-            }
-        ]);
-        
-        // Create a map of user IDs to GPT counts
-        const gptCountMap = {};
-        assignments.forEach(assignment => {
-            gptCountMap[assignment._id.toString()] = assignment.count;
-        });
-        
-        // Add GPT counts to user objects
-        const usersWithCounts = users.map(user => {
-            const userObj = user.toObject();
-            userObj.gptCount = gptCountMap[user._id.toString()] || 0;
-            return userObj;
-        });
-        
-        res.status(200).json({
-            success: true,
-            users: usersWithCounts,
-            total,
-            page,
-            limit
-        });
+      // Verify admin role
+      if (req.user.role !== 'admin') {
+        return res.status(403).json({ success: false, message: 'Not authorized' });
+      }
+  
+      // Get pagination parameters
+      const page = parseInt(req.query.page, 10) || 1;
+      const limit = parseInt(req.query.limit, 10) || 10;
+      const skip = (page - 1) * limit;
+  
+      // Execute queries in parallel
+      const [total, users, assignments] = await Promise.all([
+        User.countDocuments({ _id: { $ne: req.user._id } }),
+        User.find({ _id: { $ne: req.user._id } })
+          .select('name email role createdAt') // Explicitly select fields
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .lean(), // Convert to plain JS objects
+        UserGptAssignment.aggregate([
+          { $group: { _id: '$userId', count: { $sum: 1 } } },
+        ]),
+      ]);
+  
+      // Create GPT count map
+      const gptCountMap = Object.fromEntries(
+        assignments.map(({ _id, count }) => [_id.toString(), count])
+      );
+  
+      // Add GPT counts to users
+      const usersWithCounts = users.map((user) => ({
+        ...user,
+        gptCount: gptCountMap[user._id] || 0,
+      }));
+  
+      return res.status(200).json({
+        success: true,
+        users: usersWithCounts,
+        total,
+        page,
+        limit,
+      });
     } catch (error) {
-        console.error('Error fetching users with GPT counts:', error);
-        res.status(500).json({ message: error.message });
+      console.error('Error fetching users with GPT counts:', error);
+      return res.status(500).json({ success: false, message: error.message });
     }
-};
+  };
 
 // Get a single user's GPT count
 const getUserGptCount = async (req, res) => {
@@ -608,83 +534,12 @@ const getUserActivity = async (req, res) => {
         if (req.user.role !== 'admin' && req.user._id.toString() !== userId) {
             return res.status(403).json({ message: 'Not authorized to access this resource' });
         }
-        
-        // For now, return empty array - you can implement actual activity tracking later
         return res.status(200).json({
             success: true,
             activities: []
         });
     } catch (error) {
         console.error('Error fetching user activity:', error);
-        return res.status(500).json({ message: error.message });
-    }
-};
-
-// Get user notes
-const getUserNotes = async (req, res) => {
-    try {
-        const { userId } = req.params;
-        
-        // Only admin should be able to access other users' notes
-        if (req.user.role !== 'admin' && req.user._id.toString() !== userId) {
-            return res.status(403).json({ message: 'Not authorized to access this resource' });
-        }
-        
-        // For now, return empty array - you can implement notes functionality later
-        return res.status(200).json({
-            success: true,
-            notes: []
-        });
-    } catch (error) {
-        console.error('Error fetching user notes:', error);
-        return res.status(500).json({ message: error.message });
-    }
-};
-
-// Add user note
-const addUserNote = async (req, res) => {
-    try {
-        const { userId } = req.params;
-        const { text } = req.body;
-        
-        // Only admin should be able to add notes to users
-        if (req.user.role !== 'admin') {
-            return res.status(403).json({ message: 'Not authorized to access this resource' });
-        }
-        
-        // For now, return a mock note - you can implement actual note adding later
-        return res.status(200).json({
-            success: true,
-            note: {
-                id: Date.now().toString(),
-                text,
-                createdBy: req.user.name,
-                createdAt: new Date()
-            }
-        });
-    } catch (error) {
-        console.error('Error adding user note:', error);
-        return res.status(500).json({ message: error.message });
-    }
-};
-
-// Delete user note
-const deleteUserNote = async (req, res) => {
-    try {
-        const { userId, noteId } = req.params;
-        
-        // Only admin should be able to delete notes
-        if (req.user.role !== 'admin') {
-            return res.status(403).json({ message: 'Not authorized to access this resource' });
-        }
-        
-        // For now, just return success - you can implement actual note deletion later
-        return res.status(200).json({
-            success: true,
-            message: 'Note deleted successfully'
-        });
-    } catch (error) {
-        console.error('Error deleting user note:', error);
         return res.status(500).json({ message: error.message });
     }
 };
@@ -751,7 +606,6 @@ const updateUserProfilePicture = async (req, res) => {
                  if (process.env.R2_PUBLIC_URL && user.profilePic.startsWith(process.env.R2_PUBLIC_URL)) {
                      const key = user.profilePic.replace(process.env.R2_PUBLIC_URL + '/', '');
                      await deleteFromR2(key);
-                     console.log(`Deleted old profile picture from R2: ${key}`);
                  }
              } catch (deleteError) {
                  console.error("Failed to delete old profile picture, proceeding anyway:", deleteError);
@@ -857,32 +711,25 @@ const getApiKeys = async (req, res) => {
 // Save user's API keys
 const saveApiKeys = async (req, res) => {
     try {
-        console.log("Request body received:", req.body);
         const { apiKeys } = req.body;
         
         if (!apiKeys) {
-            console.log("No API keys in request body");
             return res.status(400).json({ success: false, message: 'No API keys provided' });
         }
         
-        console.log("User ID:", req.user._id);
-        console.log("API keys to encrypt:", Object.keys(apiKeys));
-        
+       
         const user = await User.findById(req.user._id).select('+apiKeys');
         
         if (!user) {
-            console.log("User not found");
             return res.status(404).json({ success: false, message: 'User not found' });
         }
         
         // Encrypt API keys for storage
         const encryptedKeys = {};
         for (const [key, value] of Object.entries(apiKeys)) {
-            console.log(`Encrypting key: ${key}`);
             if (value) {
                 try {
                     encryptedKeys[key] = encrypt(value);
-                    console.log(`Successfully encrypted ${key}`);
                 } catch (err) {
                     console.error(`Error encrypting ${key}:`, err);
                     throw err;
@@ -891,12 +738,9 @@ const saveApiKeys = async (req, res) => {
         }
         
         // Store encrypted keys
-        console.log("Setting user.apiKeys");
         user.apiKeys = encryptedKeys;
         
-        console.log("Saving user");
         await user.save();
-        console.log("User saved successfully");
         
         return res.json({ success: true, message: 'API keys saved successfully' });
     } catch (error) {
@@ -941,4 +785,4 @@ const updatePassword = async (req, res) => {
     }
 };
 
-module.exports = { Signup, Login, Logout, googleAuth, googleAuthCallback, refreshTokenController, getCurrentUser, getAllUsers, inviteTeamMember, getPendingInvitesCount, setInactive, removeTeamMember, getUsersWithGptCounts, getUserGptCount, getUserActivity, getUserNotes, addUserNote, deleteUserNote, updateUserProfile, updateUserProfilePicture, changePassword, getApiKeys, saveApiKeys, updatePassword };
+module.exports = { Signup, Login, Logout, googleAuth, googleAuthCallback, refreshTokenController, getCurrentUser, getAllUsers, inviteTeamMember, setInactive, removeTeamMember, getUsersWithGptCounts, getUserGptCount, getUserActivity, updateUserProfile, updateUserProfilePicture, changePassword, getApiKeys, saveApiKeys, updatePassword };

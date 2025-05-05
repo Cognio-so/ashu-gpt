@@ -83,8 +83,6 @@ export const AuthProvider = ({ children }) => {
     setUser(userData);
     setLoading(false);
     
-    console.log("Auth callback processed with token:", !!token);
-    console.log("User role:", userData?.role);
     
     localStorage.setItem('user', JSON.stringify(userData));
     

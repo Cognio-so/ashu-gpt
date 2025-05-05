@@ -124,7 +124,6 @@ const AdminChat = () => {
         try {
             // Add additional check for gptData._id being defined
             if (!gptData || !userData || !gptData._id || hasNotifiedGptOpened) {
-                console.log("Skipping GPT opened notification due to missing data");
                 return;
             }
             
@@ -133,7 +132,6 @@ const AdminChat = () => {
                 url && (url.startsWith('http://') || url.startsWith('https://'))
             ) || [];
             
-            console.log("Notifying GPT opened:", gptData._id);
             
             // Get hybridSearch setting from capabilities
             const useHybridSearch = gptData.capabilities?.hybridSearch || false;
@@ -163,7 +161,6 @@ const AdminChat = () => {
             );
             
             if (response.data.success) {
-                console.log("GPT opened notification successful");
                 setCollectionName(response.data.collection_name);
                 setHasNotifiedGptOpened(true);
             }
@@ -188,7 +185,6 @@ const AdminChat = () => {
             return;
         }
         if (authLoading) {
-            console.log("AdminChat: Auth loading..."); setIsInitialLoading(true);
             return;
         }
         if (!authLoading && !user) {
@@ -203,8 +199,6 @@ const AdminChat = () => {
              return;
         }
 
-        // Conditions met (gptId, admin user loaded)
-        console.log("AdminChat: Conditions met. Starting fetch.");
         setIsInitialLoading(true);
 
         const fetchAdminChatData = async () => {
@@ -214,12 +208,10 @@ const AdminChat = () => {
 
             try {
                 // --- Step 1: Fetch GPT Data ---
-                console.log("[AdminChat] Fetching GPT data:", gptId);
                 const gptResponse = await axiosInstance.get(`/api/custom-gpts/${gptId}`, { withCredentials: true }); // Use admin route for GPTs if different
 
                 if (gptResponse.data?.success && gptResponse.data.customGpt) {
                     fetchedGptData = gptResponse.data.customGpt;
-                    console.log("[AdminChat] GPT data fetched:", fetchedGptData.name);
                     setGptData(fetchedGptData); // Set GPT data immediately
                      // Setup collection name, notify opened (if needed for admin view)
                     const sanitizedEmail = (user.email || 'admin').replace(/[^a-zA-Z0-9]/g, '_');
@@ -236,7 +228,6 @@ const AdminChat = () => {
 
                 // --- Step 2: Fetch Specific Conversation if ID exists ---
                 if (currentConversationId) {
-                    console.log("[AdminChat] Loading specific conversation:", currentConversationId);
                     // Use the NEW admin route
                     const historyResponse = await axiosInstance.get(`/api/chat-history/admin/conversation/${currentConversationId}`, { withCredentials: true }); 
 
@@ -255,9 +246,7 @@ const AdminChat = () => {
                             content: msg.content,
                             timestamp: msg.timestamp || conversation.createdAt
                         }));
-                        console.log(`[AdminChat] Loaded ${conversationMessages.length} messages from conversation ${currentConversationId}.`);
                     } else {
-                        console.log("[AdminChat] Specific conversation not found or empty.");
                         conversationMessages = [{ // Add a system message indicating issue
                            id: Date.now(), role: 'system', content: `Could not load conversation ${currentConversationId}. It might be empty or not found.`, timestamp: new Date() 
                         }];
@@ -272,7 +261,6 @@ const AdminChat = () => {
                 // --- Step 3: Set Messages & Memory State ---
                 setMessages(conversationMessages);
                 setConversationMemory(conversationMemorySlice);
-                console.log("[AdminChat] Messages and memory state updated.");
 
             } catch (err) {
                 console.error("[AdminChat] Error during fetch:", err);
@@ -281,7 +269,6 @@ const AdminChat = () => {
                 setConversationMemory([]);
             } finally {
                 // --- Step 4: Mark initial loading complete ---
-                console.log("[AdminChat] Process complete. Setting isInitialLoading to false.");
                 setIsInitialLoading(false);
             }
         };
@@ -290,7 +277,6 @@ const AdminChat = () => {
 
         // Cleanup
         return () => {
-            console.log("useEffect cleanup: Resetting loading states.");
             setIsInitialLoading(false);
             setLoading(prev => ({ ...prev, message: false }));
         };
@@ -332,7 +318,6 @@ const AdminChat = () => {
                 return null;
             }
 
-            console.log(`Saving ${role} message to history:`, message.substring(0, 30) + '...');
             
             const payload = {
                 userId: user._id,
@@ -357,7 +342,6 @@ const AdminChat = () => {
                 setConversationId(response.data.conversation._id);
             }
 
-            console.log(`${role} message saved successfully:`, response.data);
             return response.data;
         } catch (error) {
             console.error(`Error saving ${role} message to history:`, error.response?.data || error.message);
@@ -441,7 +425,6 @@ const AdminChat = () => {
             
             // Try streaming first
             try {
-                console.log("Attempting streaming response with payload:", payload); // Log the payload
                 const response = await fetch(`${PYTHON_URL}/chat-stream`, {
                     method: "POST",
                     headers: {
@@ -453,7 +436,6 @@ const AdminChat = () => {
                 });
                 
                 if (response.ok) {
-                    console.log("Stream response OK, handling stream...");
                     await handleStreamingResponse(response);
                 } else {
                     console.error("Stream response not OK:", response.status, response.statusText);
@@ -467,7 +449,6 @@ const AdminChat = () => {
                 // Fallback to regular chat API
                  // Remove model from payload as it's handled backend-side
                 // delete payload.model; 
-                console.log("Attempting fallback response with payload:", payload); // Log the fallback payload
 
                 const fallbackResponse = await axios.post(
                     `${PYTHON_URL}/chat`, 
@@ -481,7 +462,6 @@ const AdminChat = () => {
                     }
                 );
                 
-                console.log("Fallback response:", fallbackResponse.data);
                 
                 if (fallbackResponse.data && fallbackResponse.data.success && fallbackResponse.data.response) {
                     const aiResponse = {
@@ -669,14 +649,11 @@ const AdminChat = () => {
                 await axios.get(`${PYTHON_URL}/gpt-collection-info/test/test`);
                 setBackendAvailable(true);
             } catch (error) {
-                // Even if the endpoint returns 404/400, the server is still running
-                // Only mark as offline for network errors
+
                 if (error.code === "ERR_NETWORK") {
                     console.error("Backend server appears to be offline:", error);
                     setBackendAvailable(false);
                 } else {
-                    // If we get any response (even error), server is running
-                    console.log("Backend server available but request failed:", error);
                     setBackendAvailable(true);
                 }
             }
@@ -688,7 +665,6 @@ const AdminChat = () => {
     // Add this useEffect to log streaming message updates
     useEffect(() => {
         if (streamingMessage) {
-            console.log("Streaming message updated:", streamingMessage);
         }
     }, [streamingMessage]);
 
@@ -700,14 +676,12 @@ const AdminChat = () => {
         let doneStreaming = false;
         
         const messageId = streamingMessage?.id || Date.now();
-        console.log(`[Stream ${messageId}] Starting to read stream.`);
         
         try {
             while (!doneStreaming) {
                 const { done, value } = await reader.read();
                 
                 if (done) {
-                    console.log(`[Stream ${messageId}] Stream finished.`);
                     doneStreaming = true;
                     break; // Exit the loop
                 }
@@ -732,7 +706,6 @@ const AdminChat = () => {
                         }
                         
                         if (parsed.done === true) {
-                            console.log(`[Stream ${messageId}] Done signal received.`);
                             doneStreaming = true; // Mark as done
                             break; // Stop processing lines for this chunk
                         }
@@ -751,7 +724,6 @@ const AdminChat = () => {
             }
             
             // Final Update After Stream Ends
-            console.log(`[Stream ${messageId}] Finalizing state. Full content length: ${buffer.length}`);
             setStreamingMessage(prev => 
                 prev ? { 
                     ...prev, 
@@ -765,7 +737,6 @@ const AdminChat = () => {
             // Save the final content (or error) to history
             if (buffer || streamingMessage?.isError) {
                 await saveMessageToHistory(buffer || streamingMessage?.content, 'assistant');
-                console.log(`[Stream ${messageId}] Final message saved to history.`);
             } else {
                 console.warn(`[Stream ${messageId}] No final content buffer to save.`);
             }
@@ -779,7 +750,6 @@ const AdminChat = () => {
             );
             await saveMessageToHistory("Error reading response stream.", 'assistant'); // Save error
         } finally {
-            console.log(`[Stream ${messageId}] Cleaning up. Setting loading to false.`);
             setLoading(prev => ({ ...prev, message: false })); // Ensure loading always stops
         }
     };
@@ -788,7 +758,6 @@ const AdminChat = () => {
     useEffect(() => {
         // When a streaming message completes, add it to the messages array
         if (streamingMessage && !streamingMessage.isStreaming) {
-            console.log("Adding completed streaming message to messages:", streamingMessage);
             
             // First add to main message list
             setMessages(prev => {

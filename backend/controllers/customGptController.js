@@ -442,14 +442,11 @@ const getUserAssignedGpts = async (req, res) => {
   try {
     const userId = req.params.userId || req.user._id;  // Allow using either parameter or current user
     
-    console.log(`Fetching GPTs for user: ${userId}`);
     
     // Check for assignments in UserGptAssignment collection
     const assignments = await UserGptAssignment.find({ userId }).lean();
-    console.log(`Found ${assignments.length} assignments`);
     
     if (assignments.length === 0) {
-      console.log('No GPT assignments found for this user');
       return res.status(200).json({
         success: true,
         gpts: []
@@ -458,10 +455,8 @@ const getUserAssignedGpts = async (req, res) => {
     
     // Get GPT details for each assignment
     const gptIds = assignments.map(assignment => assignment.gptId);
-    console.log(`Looking up GPTs with IDs: ${gptIds.join(', ')}`);
     
     const gpts = await CustomGpt.find({ _id: { $in: gptIds } }).lean();
-    console.log(`Found ${gpts.length} GPTs from ${gptIds.length} assignments`);
     
     // Add assignment dates and folder to each GPT
     const gptsWithDetails = gpts.map(gpt => {

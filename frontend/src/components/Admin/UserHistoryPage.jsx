@@ -78,7 +78,6 @@ const UserHistoryPage = () => {
                             }
                         }
                     } catch (error) {
-                        console.log("Could not fetch team history:", error);
                     }
                     
                     // Process and enrich the conversation data

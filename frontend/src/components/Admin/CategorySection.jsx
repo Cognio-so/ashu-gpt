@@ -3,8 +3,9 @@ import AgentCard from './AgentCard';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../../context/ThemeContext';
 import { FiUser, FiMessageSquare, FiCode, FiMoreHorizontal, FiExternalLink } from 'react-icons/fi';
+import { FixedSizeGrid } from 'react-window';
 
-const CategorySection = ({ title, agentCount, agents }) => {
+const CategorySection = ({ title, agentCount, agents, virtualized = false }) => {
     // Detect mobile view
     const [isMobileView, setIsMobileView] = useState(false);
     const navigate = useNavigate();
@@ -53,34 +54,60 @@ const CategorySection = ({ title, agentCount, agents }) => {
         );
     };
 
+    // Calculate rows and columns based on viewport width
+    const columnCount = window.innerWidth < 640 ? 1 : 
+                        window.innerWidth < 1024 ? 2 : 
+                        window.innerWidth < 1280 ? 3 : 4;
+    
+    const rowCount = Math.ceil(agents.length / columnCount);
+
     return (
-        <div className="mb-4 sm:mb-6">
-            <div className="flex items-center justify-between mb-3">
-                <h3 className="text-base sm:text-lg md:text-xl font-semibold text-gray-900 dark:text-gray-100">
-                    {title}
-                </h3>
-                <span className="text-xs md:text-sm text-gray-500 dark:text-gray-400">{agentCount} agent{agentCount !== 1 && 's'}</span>
+        <div className="mb-8">
+            <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white">{title}</h3>
+                <span className="text-xs md:text-sm text-gray-500 dark:text-gray-400">{agentCount} agents</span>
             </div>
 
-            {isMobileView ? (
-                <div className="bg-white dark:bg-gray-800/50 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700/80 shadow-sm">
-                    {agents.map((agent) => (
-                        <MobileAgentItem
-                            key={agent.id || agent.name}
-                            agent={agent}
-                            onClick={() => navigate(`/admin/chat/${agent.id}`)}
-                        />
-                    ))}
+            {virtualized ? (
+                <FixedSizeGrid
+                    columnCount={columnCount}
+                    columnWidth={300}
+                    height={400}
+                    rowCount={rowCount}
+                    rowHeight={220}
+                    width={columnCount * 300}
+                    className="mx-auto"
+                >
+                    {({ columnIndex, rowIndex, style }) => {
+                        const index = rowIndex * columnCount + columnIndex;
+                        if (index >= agents.length) return null;
+                        
+                        const agent = agents[index];
+                        return (
+                            <div style={style}>
+                                <AgentCard
+                                    key={agent.id}
+                                    agentId={agent.id}
+                                    agentImage={agent.image}
+                                    agentName={agent.name}
+                                    status={agent.status}
+                                    userCount={agent.userCount}
+                                    messageCount={agent.messageCount}
+                                    modelType={agent.modelType}
+                                />
                 </div>
+                        );
+                    }}
+                </FixedSizeGrid>
             ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 md:gap-4">
                     {agents.map((agent) => (
                         <AgentCard
-                            key={agent.id || agent.name}
+                            key={agent.id}
                             agentId={agent.id}
                             agentImage={agent.image}
                             agentName={agent.name}
-                            status={agent.status === 'Active' ? 'online' : (agent.status || 'offline')}
+                            status={agent.status}
                             userCount={agent.userCount}
                             messageCount={agent.messageCount}
                             modelType={agent.modelType}

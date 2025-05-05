@@ -87,7 +87,6 @@ const HistoryPage = () => {
           try {
             // Check if user is an admin
             if (user.role !== 'admin') {
-              console.log("Non-admin user attempted to access team view");
               setViewType('personal');
               return;
             }

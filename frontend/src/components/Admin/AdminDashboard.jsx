@@ -9,7 +9,7 @@ import { useTheme } from '../../context/ThemeContext';
 
 
 // Default image for agents without images
-const defaultAgentImage = 'path/to/your/default/image.png';
+const defaultAgentImage = '/img.png';
 
 
 const AdminDashboard = ({ userName = "Admin User" }) => {
