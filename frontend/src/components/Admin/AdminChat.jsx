@@ -748,8 +748,15 @@ const AdminChat = () => {
                             className="text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-white p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex items-center justify-center w-10 h-10"
                             aria-label="New Chat"
                         >
-                            <IoAddCircleOutline size={24} />
+                            <IoAddCircleOutline size={24} /> 
                         </button>
+
+                        {gptData && (
+                            <div className="ml-2 text-sm md:text-base font-medium truncate max-w-[150px] md:max-w-xs">
+                                New Chat
+                            </div>
+                        )}
+
                     </div>
                     <div className="relative">
                         <button
