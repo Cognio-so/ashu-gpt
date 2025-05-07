@@ -38,9 +38,9 @@ const AssignGptsModal = ({ isOpen, onClose, teamMember, onAssignmentChange }) =>
                     setAssignedGptIds(assignedIds);
                     setLocallySelectedIds(assignedIds); // Initialize local selection with current assignments
                 } else {
-                     setAssignedGptIds(new Set()); // Ensure it's a set even if fetch fails
-                     setLocallySelectedIds(new Set());
-                 }
+                    setAssignedGptIds(new Set()); // Ensure it's a set even if fetch fails
+                    setLocallySelectedIds(new Set());
+                }
 
             } catch (error) {
                 console.error("Error fetching GPTs:", error);
@@ -55,25 +55,25 @@ const AssignGptsModal = ({ isOpen, onClose, teamMember, onAssignmentChange }) =>
         fetchData();
     }, [isOpen, teamMember]);
 
-     // Toggle local selection of a GPT ID
-     const toggleGptSelection = (gptId) => {
-         setLocallySelectedIds(prev => {
-             const newSet = new Set(prev);
-             if (newSet.has(gptId)) {
-                 newSet.delete(gptId); // Unselect
-             } else {
-                 newSet.add(gptId); // Select
-             }
-             return newSet;
-         });
-     };
+    // Toggle local selection of a GPT ID
+    const toggleGptSelection = (gptId) => {
+        setLocallySelectedIds(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(gptId)) {
+                newSet.delete(gptId); // Unselect
+            } else {
+                newSet.add(gptId); // Select
+            }
+            return newSet;
+        });
+    };
 
 
     // Assign/Unassign GPTs based on the difference between initial and final selections
     const handleSaveChanges = async () => {
         setSaving(true);
         let errors = [];
-        
+
         try {
             const initialAssignedIds = assignedGptIds;
             const finalSelectedIds = locallySelectedIds;
@@ -89,7 +89,7 @@ const AssignGptsModal = ({ isOpen, onClose, teamMember, onAssignmentChange }) =>
                     await axiosInstance.post(
                         `/api/custom-gpts/team/members/${teamMember.id}/gpts`,
                         { gptId }, // Make sure this matches exactly what the backend expects
-                        { 
+                        {
                             withCredentials: true,
                             headers: {
                                 'Content-Type': 'application/json'
@@ -141,7 +141,7 @@ const AssignGptsModal = ({ isOpen, onClose, teamMember, onAssignmentChange }) =>
             if (onAssignmentChange) {
                 onAssignmentChange(teamMember.id);
             }
-            
+
             onClose();
         } catch (error) {
             console.error("Error in handleSaveChanges:", error);
@@ -174,27 +174,22 @@ const AssignGptsModal = ({ isOpen, onClose, teamMember, onAssignmentChange }) =>
             {/* Apply theme overlay */}
             <div className="absolute inset-0 bg-black/60 dark:bg-black/80" onClick={onClose}></div>
 
-            {/* Apply theme colors to modal */}
             <div className="relative bg-white dark:bg-gray-800 w-full max-w-2xl max-h-[90vh] rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
-                {/* Header */}
-                 {/* Apply theme colors */}
-                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900 flex-shrink-0">
+                <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900 flex-shrink-0">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                         Assign GPTs to {teamMember?.name}
                     </h3>
                     <button
                         onClick={onClose}
-                         className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-white transition-colors rounded-full p-1 hover:bg-gray-200 dark:hover:bg-gray-700"
+                        className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-white transition-colors rounded-full p-1 hover:bg-gray-200 dark:hover:bg-gray-700"
                     >
                         <IoClose size={22} />
                     </button>
                 </div>
 
-                {/* Search */}
-                 {/* Apply theme colors */}
-                 <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+                <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
                     <div className="relative">
-                         <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                        <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                         <input
                             type="text"
                             placeholder="Search GPTs..."
@@ -205,27 +200,23 @@ const AssignGptsModal = ({ isOpen, onClose, teamMember, onAssignmentChange }) =>
                     </div>
                 </div>
 
-                {/* GPT List - Scrollable */}
                 <div className="flex-1 overflow-y-auto custom-scrollbar-dark dark:custom-scrollbar">
                     {loading ? (
-                         // Apply theme colors
                         <div className="flex justify-center items-center h-40 text-gray-500 dark:text-gray-400">
                             <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
                         </div>
                     ) : filteredGpts.length === 0 ? (
-                         // Apply theme colors
                         <div className="p-6 text-center text-gray-500 dark:text-gray-400">
                             No GPTs found{searchTerm && ` matching "${searchTerm}"`}.
                         </div>
                     ) : (
-                        <div className="space-y-2 p-4"> {/* Use space-y for gaps */}
+                        <div className="space-y-2 p-4">
                             {filteredGpts.map(gpt => {
-                                const isSelected = locallySelectedIds.has(gpt._id); // Check local selection
+                                const isSelected = locallySelectedIds.has(gpt._id);
 
                                 return (
                                     <div
                                         key={gpt._id}
-                                         // Apply theme colors and selection styles
                                         className={`
                                             p-3 rounded-lg border transition-colors duration-150 flex items-center cursor-pointer
                                             ${isSelected
@@ -235,9 +226,8 @@ const AssignGptsModal = ({ isOpen, onClose, teamMember, onAssignmentChange }) =>
                                         `}
                                         onClick={() => toggleGptSelection(gpt._id)}
                                     >
-                                        {/* GPT Image/Icon */}
-                                        {/* Apply theme colors */}
-                                         <div className="flex-shrink-0 w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br from-gray-200 to-gray-300 dark:from-blue-600 dark:to-purple-600 flex items-center justify-center mr-3">
+
+                                        <div className="flex-shrink-0 w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br from-gray-200 to-gray-300 dark:from-blue-600 dark:to-purple-600 flex items-center justify-center mr-3">
                                             {gpt.imageUrl ? (
                                                 <img src={gpt.imageUrl} alt={gpt.name} className="w-full h-full object-cover" />
                                             ) : (
@@ -245,22 +235,17 @@ const AssignGptsModal = ({ isOpen, onClose, teamMember, onAssignmentChange }) =>
                                             )}
                                         </div>
 
-                                        {/* GPT Info */}
                                         <div className="flex-1 mr-3 overflow-hidden">
-                                            {/* Apply theme colors */}
                                             <h3 className="font-medium truncate text-gray-900 dark:text-white" title={gpt.name}>{gpt.name}</h3>
                                             <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1" title={gpt.description}>{gpt.description}</p>
                                         </div>
 
-                                        {/* Selection Checkbox */}
                                         <div className="flex-shrink-0">
-                                             {/* Apply theme colors to checkbox */}
-                                             <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all duration-150 ${
-                                                 isSelected
-                                                     ? 'bg-blue-600 border-blue-600'
+                                            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all duration-150 ${isSelected
+                                                    ? 'bg-blue-600 border-blue-600'
                                                     : 'bg-white dark:bg-gray-600 border-gray-300 dark:border-gray-500 group-hover:border-gray-400 dark:group-hover:border-gray-400'
-                                             }`}>
-                                                {isSelected && <FiCheck className="text-white" size={14} strokeWidth={3}/>}
+                                                }`}>
+                                                {isSelected && <FiCheck className="text-white" size={14} strokeWidth={3} />}
                                             </div>
                                         </div>
                                     </div>
@@ -270,15 +255,14 @@ const AssignGptsModal = ({ isOpen, onClose, teamMember, onAssignmentChange }) =>
                     )}
                 </div>
 
-                {/* Footer */}
-                 {/* Apply theme colors */}
-                 <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900 flex-shrink-0">
-                     {/* Apply theme colors */}
+
+                <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900 flex-shrink-0">
+
                     <div className="text-sm text-gray-600 dark:text-gray-400">
                         {locallySelectedIds.size} GPT(s) selected
                     </div>
                     <div className="flex space-x-3">
-                        {/* Apply theme colors to buttons */}
+
                         <button
                             onClick={onClose}
                             className="px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-white rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors text-sm"
@@ -287,10 +271,10 @@ const AssignGptsModal = ({ isOpen, onClose, teamMember, onAssignmentChange }) =>
                         </button>
                         <button
                             onClick={handleSaveChanges}
-                             disabled={!changesMade || saving} // Disable if no changes or currently saving
-                             className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed text-sm flex items-center"
+                            disabled={!changesMade || saving}
+                            className="px-4 py-2 bg-black dark:bg-white text-white dark:text-black rounded-lg font-medium hover:bg-black/70 dark:hover:bg-white/70 transition-colors disabled:opacity-60 disabled:cursor-not-allowed text-sm flex items-center"
                         >
-                             {saving && <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2"></div>}
+                            {saving && <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2"></div>}
                             {saving ? 'Saving...' : 'Save Changes'}
                         </button>
                     </div>

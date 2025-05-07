@@ -7,9 +7,9 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
     const location = useLocation();
 
     if (loading) {
-        
+
         return (
-             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
                 Loading...
             </div>
         );
@@ -22,8 +22,8 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
     }
 
     if (allowedRoles && !allowedRoles.includes(user.role)) {
-        
-         console.warn(`User role '${user.role}' not authorized for route requiring roles: ${allowedRoles.join(', ')} at ${location.pathname}`);
+
+        console.warn(`User role '${user.role}' not authorized for route requiring roles: ${allowedRoles.join(', ')} at ${location.pathname}`);
         return <Navigate to="/unauthorized" replace />;
     }
 

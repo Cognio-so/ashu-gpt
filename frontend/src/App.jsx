@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { Toaster } from 'react-hot-toast'
 import SignupPage from './pages/SignupPage'
 import LoginPage from './pages/LoginPage'
 import Homepage from './pages/Homepage'
@@ -37,7 +38,7 @@ function App() {
     // Read initial theme preference directly for the loading screen
     const savedTheme = localStorage.getItem('theme');
     // Default to dark mode if no theme is saved or value is invalid
-    const initialIsDarkMode = savedTheme ? savedTheme === 'dark' : true; 
+    const initialIsDarkMode = savedTheme ? savedTheme === 'dark' : true;
 
     return (
       // Updated: Background color based on initial theme check
@@ -51,35 +52,61 @@ function App() {
   const getDefaultPathForUser = (loggedInUser) => {
     if (!loggedInUser) return "/";
     // Updated: Changed '/employee' to '/user/dashboard' as the default user path
-    return loggedInUser.role === 'admin' ? '/admin' : '/user/dashboard'; 
+    return loggedInUser.role === 'admin' ? '/admin/dashboard' : '/user/dashboard';
   };
 
   return (
-    <Routes>
-      {/* Updated: Navigate logged-in users to their default path */}
-      <Route path="/" element={!user ? <Homepage /> : <Navigate to={getDefaultPathForUser(user)} replace />} />
-      <Route path="/login" element={!user ? <LoginPage /> : <Navigate to={getDefaultPathForUser(user)} replace />} />
-      <Route path="/signup" element={!user ? <SignupPage /> : <Navigate to={getDefaultPathForUser(user)} replace />} />
-      <Route path="/unauthorized" element={<UnauthorizedPage />} />
-      
-      {/* Updated: Changed '/employee' route to '/user/*' to match UserPage structure */}
-      <Route path="/user/*" element={ 
-        <ProtectedRoute allowedRoles={['employee', 'admin']}>
-          <UserPage />
-        </ProtectedRoute>
-      } />
+    <>
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          duration: 4000,
+          style: {
+            background: '#363636',
+            color: '#fff',
+          },
+          success: {
+            duration: 3000,
+            iconTheme: {
+              primary: '#10B981',
+              secondary: '#FFFFFF'
+            }
+          },
+          error: {
+            duration: 5000,
+            iconTheme: {
+              primary: '#EF4444',
+              secondary: '#FFFFFF'
+            }
+          }
+        }}
+      />
+      <Routes>
+        {/* Updated: Navigate logged-in users to their default path */}
+        <Route path="/" element={!user ? <Homepage /> : <Navigate to={getDefaultPathForUser(user)} replace />} />
+        <Route path="/login" element={!user ? <LoginPage /> : <Navigate to={getDefaultPathForUser(user)} replace />} />
+        <Route path="/signup" element={!user ? <SignupPage /> : <Navigate to={getDefaultPathForUser(user)} replace />} />
+        <Route path="/unauthorized" element={<UnauthorizedPage />} />
 
-      <Route path="/admin/*" element={
-        <ProtectedRoute allowedRoles={['admin']}>
-          <Admin />
-        </ProtectedRoute>
-      } />
+        {/* Updated: Changed '/employee' route to '/user/*' to match UserPage structure */}
+        <Route path="/user/*" element={
+          <ProtectedRoute allowedRoles={['employee', 'admin']}>
+            <UserPage />
+          </ProtectedRoute>
+        } />
 
-      <Route path="/auth/callback" element={<AuthCallback />} />
+        <Route path="/admin/*" element={
+          <ProtectedRoute allowedRoles={['admin']}>
+            <Admin />
+          </ProtectedRoute>
+        } />
 
-      {/* Fallback route */}
-      <Route path="*" element={<Navigate to={getDefaultPathForUser(user)} replace />} /> 
-    </Routes>
+        <Route path="/auth/callback" element={<AuthCallback />} />
+
+        {/* Fallback route */}
+        <Route path="*" element={<Navigate to={getDefaultPathForUser(user)} replace />} />
+      </Routes>
+    </>
   )
 }
 

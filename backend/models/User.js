@@ -22,6 +22,10 @@ const userSchema = new Schema({
         enum:['admin','employee'],
         default:'employee',
     },  
+    department: {
+        type: String,
+        default: 'Not Assigned'
+    },
     profilePic: {
         type: String,
         default: null

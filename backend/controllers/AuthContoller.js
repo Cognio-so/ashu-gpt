@@ -42,6 +42,12 @@ function encrypt(text) {
 // Function to decrypt API keys
 function decrypt(text) {
     try {
+        // Check if the text is in the correct format
+        if (!text || !text.includes(':')) {
+            console.log("Invalid encrypted text format");
+            return '';
+        }
+
         let key = Buffer.from(ENCRYPTION_KEY);
         if (key.length !== 32) {
             const newKey = Buffer.alloc(32);
@@ -52,6 +58,13 @@ function decrypt(text) {
         const textParts = text.split(':');
         const iv = Buffer.from(textParts.shift(), 'hex');
         const encryptedText = Buffer.from(textParts.join(':'), 'hex');
+        
+        // Ensure IV is correct length
+        if (iv.length !== IV_LENGTH) {
+            console.log("Invalid IV length in encrypted data");
+            return '';
+        }
+
         const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
         let decrypted = decipher.update(encryptedText);
         decrypted = Buffer.concat([decrypted, decipher.final()]);
@@ -356,86 +369,7 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-const inviteTeamMember = async (req, res) => {
-  try {
-    const { email, role } = req.body;
-    
-    if (!req.user || req.user.role !== 'admin') {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'Only admins can send invitations' 
-      });
-    }
-    
-    // Check if user already exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'User with this email already exists' 
-      });
-    }
-    
-    // Generate a unique invitation token
-    const token = crypto.randomBytes(20).toString('hex');
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7); // Token valid for 7 days
-    
-    // Create invitation record
-    const invitation = new Invitation({
-      email,
-      role,
-      token,
-      expiresAt,
-      invitedBy: req.user._id
-    });
-    
-    await invitation.save();
-    
-    // Send email invitation - include the role in the URL for proper redirection
-    const inviteUrl = `${process.env.FRONTEND_URL}/register?token=${token}&role=${role}`;
-    
-    // Update the mail template to indicate the redirect path based on role
-    const mailOptions = {
-      from: process.env.EMAIL_FROM,
-      to: email,
-      subject: 'Invitation to join the team',
-      html: `
-        <h1>You've been invited to join the team</h1>
-        <p>You've been invited by ${req.user.name} to join as a ${role}.</p>
-        <p>Click the link below to create your account:</p>
-        <a href="${inviteUrl}" style="padding: 10px 15px; background-color: #3182ce; color: white; border-radius: 5px; text-decoration: none;">Accept Invitation</a>
-        <p>This invitation expires in 7 days.</p>
-        <p>After registration, you will be redirected to the ${role === 'admin' ? 'admin' : 'employee'} dashboard.</p>
-      `
-    };
-    
-    try {
-      await transporter.sendMail(mailOptions);
-      
-      return res.status(200).json({
-        success: true,
-        message: 'Invitation sent successfully'
-      });
-    } catch (emailError) {
-      console.error('Error sending invitation email:', emailError);
-      
-      // If email sending fails, delete the invitation
-      await Invitation.findByIdAndDelete(invitation._id);
-      
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to send invitation email'
-      });
-    }
-  } catch (error) {
-    console.error('Error sending invitation:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Error sending invitation'
-    });
-  }
-};
+
 
 
 // Add this new function to set user as inactive
@@ -473,11 +407,11 @@ const getUsersWithGptCounts = async (req, res) => {
       const [total, users, assignments] = await Promise.all([
         User.countDocuments({ _id: { $ne: req.user._id } }),
         User.find({ _id: { $ne: req.user._id } })
-          .select('name email role createdAt') // Explicitly select fields
+          .select('name email role createdAt lastActive')
           .sort({ createdAt: -1 })
           .skip(skip)
           .limit(limit)
-          .lean(), // Convert to plain JS objects
+          .lean(),
         UserGptAssignment.aggregate([
           { $group: { _id: '$userId', count: { $sum: 1 } } },
         ]),
@@ -695,7 +629,16 @@ const getApiKeys = async (req, res) => {
         const decryptedKeys = {};
         for (const [key, value] of Object.entries(user.apiKeys)) {
             if (value) {
-                decryptedKeys[key] = decrypt(value);
+                try {
+                    decryptedKeys[key] = decrypt(value);
+                    // If decryption returned empty string due to failure, consider it invalid
+                    if (!decryptedKeys[key]) {
+                        decryptedKeys[key] = '';
+                    }
+                } catch (error) {
+                    console.error(`Failed to decrypt key ${key}:`, error);
+                    decryptedKeys[key] = '';
+                }
             } else {
                 decryptedKeys[key] = '';
             }
@@ -785,4 +728,59 @@ const updatePassword = async (req, res) => {
     }
 };
 
-module.exports = { Signup, Login, Logout, googleAuth, googleAuthCallback, refreshTokenController, getCurrentUser, getAllUsers, inviteTeamMember, setInactive, removeTeamMember, getUsersWithGptCounts, getUserGptCount, getUserActivity, updateUserProfile, updateUserProfilePicture, changePassword, getApiKeys, saveApiKeys, updatePassword };
+// Update User Permissions
+const updateUserPermissions = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { role, department } = req.body;
+        
+        // Verify admin role
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ 
+                success: false, 
+                message: 'Only admins can update user permissions' 
+            });
+        }
+
+        // Check if user exists
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ 
+                success: false, 
+                message: 'User not found' 
+            });
+        }
+
+        // Convert role to lowercase for database (frontend sends capitalized)
+        if (role) {
+            user.role = role.toLowerCase();
+        }
+        
+        // Update department if provided
+        if (department) {
+            user.department = department;
+        }
+
+        await user.save();
+
+        res.status(200).json({
+            success: true,
+            message: 'User permissions updated successfully',
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                department: user.department
+            }
+        });
+    } catch (error) {
+        console.error('Error updating user permissions:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Server error updating permissions.' 
+        });
+    }
+};
+
+module.exports = { Signup, Login, Logout, googleAuth, googleAuthCallback, refreshTokenController, getCurrentUser, getAllUsers,  setInactive, removeTeamMember, getUsersWithGptCounts, getUserGptCount, getUserActivity, updateUserProfile, updateUserProfilePicture, changePassword, getApiKeys, saveApiKeys, updatePassword, updateUserPermissions };

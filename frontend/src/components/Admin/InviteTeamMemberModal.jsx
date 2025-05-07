@@ -6,7 +6,6 @@ import { toast } from 'react-toastify';
 
 const InviteTeamMemberModal = ({ isOpen, onClose, onInviteSent }) => {
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState('employee');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
@@ -15,7 +14,6 @@ const InviteTeamMemberModal = ({ isOpen, onClose, onInviteSent }) => {
   useEffect(() => {
     if (isOpen) {
       setEmail('');
-      setRole('employee');
       setError('');
       setSuccess(false);
       setLoading(false);
@@ -30,7 +28,7 @@ const InviteTeamMemberModal = ({ isOpen, onClose, onInviteSent }) => {
     try {
       const response = await axiosInstance.post(
         `/api/auth/invite`,
-        { email, role },
+        { email },
         { withCredentials: true }
       );
 
@@ -38,7 +36,7 @@ const InviteTeamMemberModal = ({ isOpen, onClose, onInviteSent }) => {
         setSuccess(true);
         toast.success(`Invitation sent successfully to ${email}!`);
         if (onInviteSent) {
-          onInviteSent({ email, role });
+          onInviteSent({ email });
         }
       } else {
         const message = response.data.message || 'Failed to send invitation';
@@ -63,7 +61,6 @@ const InviteTeamMemberModal = ({ isOpen, onClose, onInviteSent }) => {
   const handleSendAnother = () => {
     setSuccess(false);
     setEmail('');
-    setRole('employee');
     setError('');
   };
 
@@ -102,7 +99,7 @@ const InviteTeamMemberModal = ({ isOpen, onClose, onInviteSent }) => {
                 onClick={handleSendAnother}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors text-sm flex items-center"
               >
-                <FiSend className="mr-1.5" size={14}/> Send Another
+                <FiSend className="mr-1.5" size={14} /> Send Another
               </button>
             </div>
           </div>
@@ -129,31 +126,6 @@ const InviteTeamMemberModal = ({ isOpen, onClose, onInviteSent }) => {
                 </div>
               </div>
 
-              <div>
-                <label htmlFor="invite-role" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Role
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <FiUser className="text-gray-400 dark:text-gray-500" />
-                  </div>
-                  <select
-                    id="invite-role"
-                    value={role}
-                    onChange={(e) => setRole(e.target.value)}
-                    className="appearance-none w-full pl-10 pr-8 py-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm text-black dark:text-white"
-                  >
-                    <option value="employee">Employee</option>
-                    <option value="admin">Admin</option>
-                  </select>
-                  <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                    <svg className="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                      <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                </div>
-              </div>
-
               <div className="flex justify-end gap-3 pt-2">
                 <button
                   type="button"
@@ -177,7 +149,7 @@ const InviteTeamMemberModal = ({ isOpen, onClose, onInviteSent }) => {
                     </>
                   ) : (
                     <>
-                      <FiSend className="mr-1.5" size={14}/> Send Invitation
+                      <FiSend className="mr-1.5" size={14} /> Send Invitation
                     </>
                   )}
                 </button>

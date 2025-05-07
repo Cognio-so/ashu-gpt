@@ -37,7 +37,7 @@ const AdminLayout = () => {
     return (
         <div className="flex h-screen overflow-hidden bg-black">
             <AdminSidebar activePage={activeSection} onNavigate={handleSidebarNavigate} />
-            
+
             <div className="flex-1 overflow-hidden">
                 <Routes>
                     <Route index element={<AdminDashboard />} />

@@ -1,5 +1,5 @@
-import React, { useState, useEffect} from 'react';
-import { useNavigate} from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import {
@@ -111,10 +111,9 @@ const AdminSidebar = ({ activePage = 'dashboard', onNavigate }) => {
                             <button
                                 key={item.id}
                                 onClick={() => handleNavigation(item.id)}
-                                className={`flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} w-full px-4 py-3 rounded-lg text-left transition-colors ${
-                                    activePage === item.id || (activePage === 'collections' && (item.id === 'create-gpt' || item.id.startsWith('edit-gpt')))
-                                        ? 'bg-blue-500 dark:bg-blue-600/80 text-white'
-                                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'
+                                className={`flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} w-full px-4 py-3 rounded-lg text-left transition-colors ${activePage === item.id || (activePage === 'collections' && (item.id === 'create-gpt' || item.id.startsWith('edit-gpt')))
+                                        ? 'bg-white dark:bg-white/10 text-black dark:text-white'
+                                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-black hover:text-gray-900 dark:hover:text-white'
                                     }`}
                                 title={isCollapsed ? item.label : ''}
                             >

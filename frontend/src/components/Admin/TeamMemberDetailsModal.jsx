@@ -136,10 +136,7 @@ const TeamMemberDetailsModal = memo(({ isOpen, onClose, member }) => {
         <div className="h-16 w-16 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-2xl font-medium flex-shrink-0">
           {member.name.charAt(0)}
         </div>
-        <div>
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{member.name}</h2>
-          <p className="text-gray-500 dark:text-gray-400">{member.position || 'No position set'}</p>
-        </div>
+
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 border border-gray-200 dark:border-gray-600/50">
@@ -155,10 +152,7 @@ const TeamMemberDetailsModal = memo(({ isOpen, onClose, member }) => {
               <p className="text-xs text-gray-500 dark:text-gray-400">Department</p>
               <p className="text-sm text-gray-800 dark:text-white">{member.department}</p>
             </div>
-            <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Position</p>
-              <p className="text-sm text-gray-800 dark:text-white">{member.position || 'Not set'}</p>
-            </div>
+
           </div>
         </div>
         <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 border border-gray-200 dark:border-gray-600/50">
@@ -171,11 +165,10 @@ const TeamMemberDetailsModal = memo(({ isOpen, onClose, member }) => {
             <div>
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Status</p>
               <span
-                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                  member.status === 'Active'
+                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${member.status === 'Active'
                     ? 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300'
                     : 'bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-300'
-                }`}
+                  }`}
               >
                 {member.status}
               </span>
@@ -199,7 +192,7 @@ const TeamMemberDetailsModal = memo(({ isOpen, onClose, member }) => {
       <div className="flex justify-between items-center mb-4">
         <h3 className="text-lg font-medium text-white">Assigned GPTs ({tabState.data.gpts?.length || 0})</h3>
         <button
-          className="bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-md px-3 py-1.5 flex items-center"
+          className="bg-black dark:bg-white hover:bg-black/70 dark:hover:bg-white/70 text-white dark:text-black text-sm rounded-md px-3 py-1.5 flex items-center"
           onClick={() => setShowAssignGptsModal(true)}
         >
           <FiPlus className="mr-1.5" size={14} />
@@ -247,15 +240,13 @@ const TeamMemberDetailsModal = memo(({ isOpen, onClose, member }) => {
   return (
     <>
       <div
-        className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${
-          isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
-        } transition-opacity duration-300`}
+        className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          } transition-opacity duration-300`}
       >
         <div className="absolute inset-0 bg-black/60 dark:bg-black/80" onClick={onClose}></div>
         <div
-          className={`relative bg-white dark:bg-gray-800 w-full max-w-3xl max-h-[90vh] rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col transform ${
-            isOpen ? 'scale-100' : 'scale-95'
-          } transition-transform duration-300`}
+          className={`relative bg-white dark:bg-gray-800 w-full max-w-3xl max-h-[90vh] rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col transform ${isOpen ? 'scale-100' : 'scale-95'
+            } transition-transform duration-300`}
         >
           <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900 flex-shrink-0">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate pr-4">
@@ -274,11 +265,10 @@ const TeamMemberDetailsModal = memo(({ isOpen, onClose, member }) => {
                 <button
                   key={tab.id}
                   onClick={() => setTabState((prev) => ({ ...prev, activeTab: tab.id }))}
-                  className={`px-4 py-2.5 border-b-2 text-sm font-medium transition-colors duration-200 flex items-center gap-2 whitespace-nowrap ${
-                    tabState.activeTab === tab.id
+                  className={`px-4 py-2.5 border-b-2 text-sm font-medium transition-colors duration-200 flex items-center gap-2 whitespace-nowrap ${tabState.activeTab === tab.id
                       ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                       : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white hover:border-gray-300 dark:hover:border-gray-600'
-                  }`}
+                    }`}
                 >
                   <tab.icon size={16} /> {tab.label}
                 </button>

@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const InvitationController = require('../controllers/InvitationController');
+const { inviteTeamMember, getPendingInvitesCount, verifyInvitation } = require('../controllers/InvitationController');
 const { protectRoute } = require('../middleware/authMiddleware');
 
-router.post('/invite', protectRoute, InvitationController.inviteTeamMember);
-router.get('/pending-invites/count', protectRoute, InvitationController.getPendingInvitesCount);
-router.get('/verify-invitation/:token', InvitationController.verifyInvitation);
+router.post('/invite', protectRoute, inviteTeamMember);
+router.get('/pending-invites/count', protectRoute, getPendingInvitesCount);
+router.get('/verify-invitation/:token', verifyInvitation);
 
 module.exports = router; 

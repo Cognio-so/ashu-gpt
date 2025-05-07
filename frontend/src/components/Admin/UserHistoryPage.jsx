@@ -45,25 +45,25 @@ const UserHistoryPage = () => {
                 const historyResponse = await axiosInstance.get(`/api/chat-history/user/${userId}`, {
                     withCredentials: true
                 });
-                
+
                 if (historyResponse.data && historyResponse.data.success) {
                     const conversationData = historyResponse.data.conversations || [];
-                    
+
                     // Extract user data from team history (which includes user details)
                     let userData = null;
-                    
+
                     // First try to get team history to extract user data
                     try {
                         const teamHistoryResponse = await axiosInstance.get('/api/chat-history/team', {
                             withCredentials: true
                         });
-                        
+
                         if (teamHistoryResponse.data && teamHistoryResponse.data.success) {
                             // Find conversations for this specific user
                             const userConvos = teamHistoryResponse.data.conversations.filter(
                                 c => c.userId === userId
                             );
-                            
+
                             if (userConvos.length > 0) {
                                 // Extract user data from the first conversation
                                 userData = {
@@ -79,27 +79,27 @@ const UserHistoryPage = () => {
                         }
                     } catch (error) {
                     }
-                    
+
                     // Process and enrich the conversation data
                     const processedConversations = conversationData.map(convo => ({
                         ...convo,
                         messageCount: convo.messages?.length || 0,
-                        previewContent: convo.lastMessage || 
+                        previewContent: convo.lastMessage ||
                             (convo.messages?.length > 0 ? convo.messages[convo.messages.length - 1].content : 'No messages'),
                         lastActivity: convo.updatedAt || convo.createdAt
                     }));
-                    
+
                     setConversations(processedConversations);
                     setFilteredConversations(processedConversations);
-                    
+
                     // If we couldn't get user data from team history, use the best available information
                     if (!userData) {
                         // If this is not the current user, we need a different approach to get user data
                         // Just use the user ID and extract name from history if possible
                         userData = {
                             _id: userId,
-                            name: processedConversations.length > 0 && processedConversations[0].userName 
-                                ? processedConversations[0].userName 
+                            name: processedConversations.length > 0 && processedConversations[0].userName
+                                ? processedConversations[0].userName
                                 : `User ${userId.substring(0, 6)}...`,
                             email: processedConversations.length > 0 && processedConversations[0].userEmail
                                 ? processedConversations[0].userEmail
@@ -109,7 +109,7 @@ const UserHistoryPage = () => {
                             lastActive: processedConversations.length > 0 ? processedConversations[0].updatedAt : new Date()
                         };
                     }
-                    
+
                     // Set the complete user data
                     setUser({
                         ...userData,
@@ -328,8 +328,8 @@ const UserHistoryPage = () => {
                         <>
                             <div className="flex items-center mb-6">
                                 {user.profilePicture ? (
-                                    <img 
-                                        src={user.profilePicture} 
+                                    <img
+                                        src={user.profilePicture}
                                         alt={`${user.name}'s profile`}
                                         className="h-14 w-14 rounded-full object-cover mr-4 flex-shrink-0 border-2 border-white dark:border-gray-800"
                                     />
@@ -346,16 +346,14 @@ const UserHistoryPage = () => {
 
                             <div className="mb-6">
                                 <div className="flex items-center gap-2 mb-3 flex-wrap">
-                                    <span className={`px-2.5 py-0.5 inline-flex items-center text-xs leading-5 font-semibold rounded-full ${
-                                        user.lastActive && (new Date().getTime() - new Date(user.lastActive).getTime() < 7 * 24 * 60 * 60 * 1000)
+                                    <span className={`px-2.5 py-0.5 inline-flex items-center text-xs leading-5 font-semibold rounded-full ${user.lastActive && (new Date().getTime() - new Date(user.lastActive).getTime() < 7 * 24 * 60 * 60 * 1000)
                                             ? 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300'
                                             : 'bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-300'
-                                    }`}>
-                                        <IoEllipse className={`mr-1.5 ${
-                                            user.lastActive && (new Date().getTime() - new Date(user.lastActive).getTime() < 7 * 24 * 60 * 60 * 1000)
-                                                ? 'text-green-500' 
+                                        }`}>
+                                        <IoEllipse className={`mr-1.5 ${user.lastActive && (new Date().getTime() - new Date(user.lastActive).getTime() < 7 * 24 * 60 * 60 * 1000)
+                                                ? 'text-green-500'
                                                 : 'text-yellow-500'
-                                        }`} size={8} />
+                                            }`} size={8} />
                                         {user.lastActive && (new Date().getTime() - new Date(user.lastActive).getTime() < 7 * 24 * 60 * 60 * 1000)
                                             ? 'Recently Active'
                                             : 'Inactive'
@@ -372,10 +370,10 @@ const UserHistoryPage = () => {
                                         <FiBox className="mr-2 mt-0.5 text-gray-400 dark:text-gray-500 flex-shrink-0" size={14} />
                                         <span className="text-gray-600 dark:text-gray-400 mr-1">User ID:</span>
                                         <span className="font-medium text-gray-800 dark:text-gray-200 truncate" title={user._id}>
-                                            {user._id ? `${user._id.substring(0, 6)}...${user._id.substring(user._id.length-4)}` : 'Not available'}
+                                            {user._id ? `${user._id.substring(0, 6)}...${user._id.substring(user._id.length - 4)}` : 'Not available'}
                                         </span>
                                     </div>
-                                    
+
                                     <div className="flex items-start">
                                         <FiUsers className="mr-2 mt-0.5 text-gray-400 dark:text-gray-500 flex-shrink-0" size={14} />
                                         <span className="text-gray-600 dark:text-gray-400 mr-1">Favorite GPT:</span>
@@ -383,13 +381,13 @@ const UserHistoryPage = () => {
                                             {user.favoriteGpt || (user.gptList && user.gptList.length > 0 ? user.gptList[0] : 'None')}
                                         </span>
                                     </div>
-                                    
+
                                     <div className="flex items-start">
                                         <FiCalendar className="mr-2 mt-0.5 text-gray-400 dark:text-gray-500 flex-shrink-0" size={14} />
                                         <span className="text-gray-600 dark:text-gray-400 mr-1">First Chat:</span>
                                         <span className="font-medium text-gray-800 dark:text-gray-200">{formatDateOnly(user.createdAt)}</span>
                                     </div>
-                                    
+
                                     <div className="flex items-start">
                                         <FiActivity className="mr-2 mt-0.5 text-gray-400 dark:text-gray-500 flex-shrink-0" size={14} />
                                         <span className="text-gray-600 dark:text-gray-400 mr-1">Last Active:</span>
@@ -415,7 +413,7 @@ const UserHistoryPage = () => {
                                         <span className="font-medium text-gray-800 dark:text-gray-200">{user.uniqueGpts || '—'}</span>
                                     </div>
                                 </div>
-                                
+
                                 {/* Last Conversation */}
                                 {conversations.length > 0 && (
                                     <div className="bg-white dark:bg-gray-800/50 rounded-lg p-4 border border-gray-200 dark:border-gray-700/60">
@@ -467,11 +465,10 @@ const UserHistoryPage = () => {
                                             <button
                                                 key={range.value}
                                                 onClick={() => setDateRangeFilter(range.value)}
-                                                className={`w-full text-left px-3 py-1.5 text-sm flex justify-between items-center transition-colors ${
-                                                    filterOptions.dateRange === range.value
+                                                className={`w-full text-left px-3 py-1.5 text-sm flex justify-between items-center transition-colors ${filterOptions.dateRange === range.value
                                                         ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium'
                                                         : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                                                }`}
+                                                    }`}
                                             >
                                                 {range.label}
                                                 {filterOptions.dateRange === range.value && <IoCheckmark size={16} />}
@@ -488,8 +485,8 @@ const UserHistoryPage = () => {
                         {isLoading ? renderConversationLoading() : filteredConversations.length > 0 ? (
                             <ul className="space-y-3">
                                 {filteredConversations.map((convo) => (
-                                    <li 
-                                        key={convo._id} 
+                                    <li
+                                        key={convo._id}
                                         className="flex items-center p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700/50 transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/60 cursor-pointer group"
                                         onClick={() => handleConversationClick(convo)}
                                     >

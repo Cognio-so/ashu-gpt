@@ -5,7 +5,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { FiUser, FiMessageSquare, FiCode, FiMoreHorizontal, FiExternalLink } from 'react-icons/fi';
 import { FixedSizeGrid } from 'react-window';
 
-const CategorySection = ({ title, agentCount, agents, virtualized = false }) => {
+const CategorySection = ({ title, agentCount, agents, virtualized = false, hideActionIcons = false }) => {
     // Detect mobile view
     const [isMobileView, setIsMobileView] = useState(false);
     const navigate = useNavigate();
@@ -42,23 +42,23 @@ const CategorySection = ({ title, agentCount, agents, virtualized = false }) => 
                         <h3 className="font-medium text-gray-900 dark:text-white truncate pr-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" title={agent.name}>{agent.name}</h3>
                     </div>
                     <div className="flex items-center text-gray-500 dark:text-gray-400 text-xs mt-1 gap-3 flex-wrap">
-                        <span className="flex items-center gap-1" title={`${agent.userCount} Users`}><FiUser size={12}/> {agent.userCount}</span>
-                        <span className="flex items-center gap-1" title={`${agent.messageCount} Messages`}><FiMessageSquare size={12}/> {agent.messageCount}</span>
-                        <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-gray-600 dark:text-gray-300" title={`Model: ${agent.modelType}`}><FiCode size={12}/> {agent.modelType}</span>
+                        <span className="flex items-center gap-1" title={`${agent.userCount} Users`}><FiUser size={12} /> {agent.userCount}</span>
+                        <span className="flex items-center gap-1" title={`${agent.messageCount} Messages`}><FiMessageSquare size={12} /> {agent.messageCount}</span>
+                        <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-gray-600 dark:text-gray-300" title={`Model: ${agent.modelType}`}><FiCode size={12} /> {agent.modelType}</span>
                     </div>
                 </div>
                 <div className="ml-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <FiExternalLink className="text-gray-400 dark:text-gray-500" size={14}/>
+                    <FiExternalLink className="text-gray-400 dark:text-gray-500" size={14} />
                 </div>
             </div>
         );
     };
 
     // Calculate rows and columns based on viewport width
-    const columnCount = window.innerWidth < 640 ? 1 : 
-                        window.innerWidth < 1024 ? 2 : 
-                        window.innerWidth < 1280 ? 3 : 4;
-    
+    const columnCount = window.innerWidth < 640 ? 1 :
+        window.innerWidth < 1024 ? 2 :
+            window.innerWidth < 1280 ? 3 : 4;
+
     const rowCount = Math.ceil(agents.length / columnCount);
 
     return (
@@ -81,12 +81,12 @@ const CategorySection = ({ title, agentCount, agents, virtualized = false }) => 
                     {({ columnIndex, rowIndex, style }) => {
                         const index = rowIndex * columnCount + columnIndex;
                         if (index >= agents.length) return null;
-                        
+
                         const agent = agents[index];
                         return (
                             <div style={style}>
                                 <AgentCard
-                                    key={agent.id}
+                                    key={agent.id || agent.name}
                                     agentId={agent.id}
                                     agentImage={agent.image}
                                     agentName={agent.name}
@@ -94,8 +94,9 @@ const CategorySection = ({ title, agentCount, agents, virtualized = false }) => 
                                     userCount={agent.userCount}
                                     messageCount={agent.messageCount}
                                     modelType={agent.modelType}
+                                    hideActionIcons={hideActionIcons}
                                 />
-                </div>
+                            </div>
                         );
                     }}
                 </FixedSizeGrid>
@@ -103,7 +104,7 @@ const CategorySection = ({ title, agentCount, agents, virtualized = false }) => 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 md:gap-4">
                     {agents.map((agent) => (
                         <AgentCard
-                            key={agent.id}
+                            key={agent.id || agent.name}
                             agentId={agent.id}
                             agentImage={agent.image}
                             agentName={agent.name}
@@ -111,6 +112,7 @@ const CategorySection = ({ title, agentCount, agents, virtualized = false }) => 
                             userCount={agent.userCount}
                             messageCount={agent.messageCount}
                             modelType={agent.modelType}
+                            hideActionIcons={hideActionIcons}
                         />
                     ))}
                 </div>

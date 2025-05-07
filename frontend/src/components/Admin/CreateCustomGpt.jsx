@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { IoAddOutline,  IoCloseOutline, IoPersonCircleOutline,  IoInformationCircleOutline, IoSearchOutline, IoSparklesOutline, IoArrowBackOutline } from 'react-icons/io5';
-import { FaBox, FaUpload,  FaGlobe, FaChevronDown } from 'react-icons/fa';
+import { IoAddOutline, IoCloseOutline, IoPersonCircleOutline, IoInformationCircleOutline, IoSearchOutline, IoSparklesOutline, IoArrowBackOutline } from 'react-icons/io5';
+import { FaBox, FaUpload, FaGlobe, FaChevronDown } from 'react-icons/fa';
 import { LuBrain } from 'react-icons/lu';
 import { SiOpenai, SiGooglegemini } from 'react-icons/si';
 import { BiLogoMeta } from 'react-icons/bi';
@@ -43,13 +43,13 @@ When providing code examples:
         instructions: defaultInstructions,
         conversationStarter: '',
     });
-    
+
     // Simplified capabilities state
     const [capabilities, setCapabilities] = useState({
         webBrowsing: true,
         hybridSearch: false
     });
-    
+
     const [imagePreview, setImagePreview] = useState(null);
     const [imageFile, setImageFile] = useState(null); // Store the actual file
     const [promptMode, setPromptMode] = useState('edit'); // 'edit' or 'preview'
@@ -74,12 +74,12 @@ When providing code examples:
     const fetchGptDetails = async (id) => {
         try {
             const response = await axiosInstance.get(
-                `${axiosInstance.defaults.baseURL.endsWith('/api') ? axiosInstance.defaults.baseURL : `${axiosInstance.defaults.baseURL}/api`}/custom-gpts/${id}`, 
+                `${axiosInstance.defaults.baseURL.endsWith('/api') ? axiosInstance.defaults.baseURL : `${axiosInstance.defaults.baseURL}/api`}/custom-gpts/${id}`,
                 { withCredentials: true }
             );
-            
+
             const gpt = response.data.customGpt;
-            
+
             // Set form data
             setFormData({
                 name: gpt.name,
@@ -87,7 +87,7 @@ When providing code examples:
                 instructions: gpt.instructions,
                 conversationStarter: gpt.conversationStarter || '',
             });
-            
+
             // Set other states
             setSelectedModel(gpt.model);
             setCapabilities({
@@ -96,12 +96,12 @@ When providing code examples:
                 // Ensure hybridSearch is defined even if not in original data
                 hybridSearch: gpt.capabilities?.hybridSearch ?? false
             });
-            
+
             // Set image preview if exists
             if (gpt.imageUrl) {
                 setImagePreview(gpt.imageUrl);
             }
-            
+
             // Set knowledge files
             if (gpt.knowledgeFiles && gpt.knowledgeFiles.length > 0) {
                 setKnowledgeFiles(gpt.knowledgeFiles.map(file => ({
@@ -112,7 +112,7 @@ When providing code examples:
                     index: gpt.knowledgeFiles.indexOf(file) // Maintain original index if needed
                 })));
             }
-            
+
         } catch (error) {
             console.error("Error fetching GPT details:", error);
             toast.error("Failed to load GPT details");
@@ -126,10 +126,10 @@ When providing code examples:
         const handleResize = () => {
             setIsMobileView(window.innerWidth < 768);
         };
-        
+
         window.addEventListener('resize', handleResize);
         handleResize(); // Initial check
-        
+
         return () => window.removeEventListener('resize', handleResize);
     }, []);
 
@@ -149,7 +149,7 @@ When providing code examples:
             [name]: value
         });
     };
-    
+
     const handleImageUpload = (e) => {
         const file = e.target.files[0];
         if (file) {
@@ -161,7 +161,7 @@ When providing code examples:
             reader.readAsDataURL(file);
         }
     };
-    
+
     // Updated handler for simplified capabilities
     const handleCapabilityChange = (capability) => {
         setCapabilities(prevCapabilities => ({
@@ -175,17 +175,17 @@ When providing code examples:
         setFormData({ ...formData, instructions: 'Generated prompt: Be concise and helpful.' });
         setPromptMode('edit'); // Switch back to edit mode after generating
     };
-    
+
     const handleSelectTemplate = (templateInstructions) => {
         setFormData({ ...formData, instructions: templateInstructions });
         setIsTemplateDropdownOpen(false);
         setPromptMode('edit');
     };
-    
+
     // Handler for knowledge file upload
     const handleKnowledgeUpload = (e) => {
         const files = Array.from(e.target.files);
-        
+
         // Create file objects with preview capabilities
         const newFiles = files.map(file => ({
             file, // Keep the file object for upload
@@ -194,14 +194,14 @@ When providing code examples:
             size: file.size,
             isUploaded: false // Mark as not yet uploaded to server
         }));
-        
+
         setKnowledgeFiles([...knowledgeFiles, ...newFiles]);
     };
 
     // Handler to remove a knowledge file
     const removeKnowledgeFile = async (index) => {
         const fileToRemove = knowledgeFiles[index];
-        
+
         // If the file is already uploaded to the server and we're in edit mode
         if (fileToRemove.isUploaded && isEditMode && editGptId) {
             try {
@@ -237,23 +237,23 @@ When providing code examples:
                     <h3 className="text-sm md:text-base font-medium text-gray-800 dark:text-gray-100">Model Instructions</h3>
                 </div>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Set instructions for how your GPT should behave and respond. 
+                    Set instructions for how your GPT should behave and respond.
                     <span className="ml-1 italic">Supports Markdown formatting.</span>
                 </p>
             </div>
-            
+
             <div className="p-3 md:p-4">
                 <div className="flex justify-between items-center mb-2 md:mb-3">
                     <label className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300">System Prompt</label>
                     <div className="flex space-x-2">
-                        <button 
+                        <button
                             onClick={handleGeneratePrompt}
                             className="flex items-center text-xs text-white px-2 py-1 rounded-md bg-purple-600 hover:bg-purple-700"
                         >
                             <IoSparklesOutline className="mr-1" size={14} />
                             Generate
                         </button>
-                        <button 
+                        <button
                             onClick={() => setIsTemplateDropdownOpen(!isTemplateDropdownOpen)}
                             className="flex items-center text-xs text-gray-700 dark:text-gray-300 px-2 py-1 rounded-md bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600"
                         >
@@ -262,7 +262,7 @@ When providing code examples:
                         </button>
                     </div>
                 </div>
-                
+
                 {/* Template Selector Dropdown */}
                 {isTemplateDropdownOpen && (
                     <div className="relative mb-2 md:mb-3">
@@ -270,7 +270,7 @@ When providing code examples:
                             <ul>
                                 {Object.entries(promptTemplates).map(([name, instructions]) => (
                                     <li key={name}>
-                                        <button 
+                                        <button
                                             onClick={() => handleSelectTemplate(instructions)}
                                             className="w-full text-left px-3 py-2 text-xs md:text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
                                         >
@@ -282,7 +282,7 @@ When providing code examples:
                         </div>
                     </div>
                 )}
-                
+
                 {/* Edit/Preview Toggle */}
                 <div className="flex rounded-t-md overflow-hidden mb-0 bg-gray-300 dark:bg-gray-800">
                     <button
@@ -298,12 +298,12 @@ When providing code examples:
                         Preview
                     </button>
                 </div>
-                
+
                 {/* Conditional Rendering: Edit Textarea or Preview with Markdown */}
                 {promptMode === 'edit' ? (
                     <div className="relative">
-                        <textarea 
-                            name="instructions" 
+                        <textarea
+                            name="instructions"
                             value={formData.instructions}
                             onChange={handleInputChange}
                             className="w-full bg-white dark:bg-[#262626] border border-gray-400 dark:border-gray-700 border-t-0 rounded-b-md px-3 py-2 text-xs md:text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500 min-h-[120px] md:min-h-[200px] no-scrollbar placeholder-gray-500 dark:placeholder-gray-400 font-mono"
@@ -316,63 +316,63 @@ When providing code examples:
                     </div>
                 ) : (
                     <div className="w-full bg-white dark:bg-[#262626] border border-gray-400 dark:border-gray-700 border-t-0 rounded-b-md px-3 py-2 text-xs md:text-sm text-gray-900 dark:text-white min-h-[120px] md:min-h-[200px] overflow-y-auto no-scrollbar">
-                        <ReactMarkdown 
+                        <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
                             components={{
                                 // Apply styling to specific elements
-                                p: ({node, ...props}) => <p className="mb-3 text-gray-900 dark:text-white" {...props} />,
-                                h1: ({node, ...props}) => <h1 className="text-xl font-bold mb-2 mt-3 text-gray-900 dark:text-white" {...props} />,
-                                h2: ({node, ...props}) => <h2 className="text-lg font-semibold mb-2 mt-3 text-gray-900 dark:text-white" {...props} />,
-                                h3: ({node, ...props}) => <h3 className="text-base font-medium mb-2 mt-2 text-gray-900 dark:text-white" {...props} />,
-                                ul: ({node, ...props}) => <ul className="list-disc pl-5 mb-3 text-gray-900 dark:text-white" {...props} />,
-                                ol: ({node, ...props}) => <ol className="list-decimal pl-5 mb-3 text-gray-900 dark:text-white" {...props} />,
-                                li: ({node, ...props}) => <li className="mb-1 text-gray-900 dark:text-white" {...props} />,
-                                code: ({node, inline, ...props}) => 
-                                    inline 
+                                p: ({ node, ...props }) => <p className="mb-3 text-gray-900 dark:text-white" {...props} />,
+                                h1: ({ node, ...props }) => <h1 className="text-xl font-bold mb-2 mt-3 text-gray-900 dark:text-white" {...props} />,
+                                h2: ({ node, ...props }) => <h2 className="text-lg font-semibold mb-2 mt-3 text-gray-900 dark:text-white" {...props} />,
+                                h3: ({ node, ...props }) => <h3 className="text-base font-medium mb-2 mt-2 text-gray-900 dark:text-white" {...props} />,
+                                ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-3 text-gray-900 dark:text-white" {...props} />,
+                                ol: ({ node, ...props }) => <ol className="list-decimal pl-5 mb-3 text-gray-900 dark:text-white" {...props} />,
+                                li: ({ node, ...props }) => <li className="mb-1 text-gray-900 dark:text-white" {...props} />,
+                                code: ({ node, inline, ...props }) =>
+                                    inline
                                         ? <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded text-gray-900 dark:text-white font-mono text-sm" {...props} />
                                         : <code className="block bg-gray-100 dark:bg-gray-800 p-2 rounded text-gray-900 dark:text-white font-mono text-sm overflow-x-auto" {...props} />,
-                                pre: ({node, ...props}) => <pre className="bg-gray-100 dark:bg-gray-800 p-3 rounded-md mb-3 overflow-x-auto" {...props} />,
-                                blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-gray-300 dark:border-gray-700 pl-3 italic my-2" {...props} />,
-                                a: ({node, ...props}) => <a className="text-blue-600 dark:text-blue-400 hover:underline" {...props} />
+                                pre: ({ node, ...props }) => <pre className="bg-gray-100 dark:bg-gray-800 p-3 rounded-md mb-3 overflow-x-auto" {...props} />,
+                                blockquote: ({ node, ...props }) => <blockquote className="border-l-4 border-gray-300 dark:border-gray-700 pl-3 italic my-2" {...props} />,
+                                a: ({ node, ...props }) => <a className="text-blue-600 dark:text-blue-400 hover:underline" {...props} />
                             }}
                         >
                             {formData.instructions}
                         </ReactMarkdown>
                     </div>
                 )}
-                
+
                 {/* Markdown helper */}
                 {promptMode === 'edit' && (
                     <div className="mt-2 flex flex-wrap gap-1">
-                        <button 
+                        <button
                             onClick={() => insertMarkdown('**bold**')}
                             className="px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600"
                             title="Bold"
                         >
                             <strong>B</strong>
                         </button>
-                        <button 
+                        <button
                             onClick={() => insertMarkdown('*italic*')}
                             className="px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600"
                             title="Italic"
                         >
                             <em>I</em>
                         </button>
-                        <button 
+                        <button
                             onClick={() => insertMarkdown('## Heading')}
                             className="px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600"
                             title="Heading"
                         >
                             H
                         </button>
-                        <button 
+                        <button
                             onClick={() => insertMarkdown('- List item')}
                             className="px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600"
                             title="List"
                         >
                             • List
                         </button>
-                        <button 
+                        <button
                             onClick={() => insertMarkdown('```\ncode block\n```')}
                             className="px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600"
                             title="Code Block"
@@ -392,12 +392,12 @@ When providing code examples:
             const start = textarea.selectionStart;
             const end = textarea.selectionEnd;
             const newText = formData.instructions.substring(0, start) + markdown + formData.instructions.substring(end);
-            
+
             setFormData({
                 ...formData,
                 instructions: newText
             });
-            
+
             // Focus back on textarea and set cursor position after the inserted markdown
             setTimeout(() => {
                 textarea.focus();
@@ -431,7 +431,7 @@ When providing code examples:
                     }
                 }
             );
-            
+
             if (response.data.success) {
                 toast.success("Knowledge files indexed successfully");
             } else {
@@ -447,7 +447,7 @@ When providing code examples:
     // Modify handleSaveGpt to call the indexing function
     const handleSaveGpt = async () => {
         setIsSaving(true);
-        
+
         try {
             // Prepare form data for API
             const apiFormData = new FormData();
@@ -457,74 +457,74 @@ When providing code examples:
             apiFormData.append('conversationStarter', formData.conversationStarter);
             apiFormData.append('model', selectedModel);
             apiFormData.append('capabilities', JSON.stringify(capabilities));
-            
+
             // Add image if selected
             if (imageFile) {
                 apiFormData.append('image', imageFile);
             }
-            
+
             const newKnowledgeFiles = knowledgeFiles.filter(file => !file.isUploaded);
             newKnowledgeFiles.forEach(fileObj => {
                 apiFormData.append('knowledgeFiles', fileObj.file);
             });
-            
+
             let response;
             let successMessage = '';
-            
+
             if (isEditMode) {
                 response = await axiosInstance.put(
-                    `${axiosInstance.defaults.baseURL.endsWith('/api') ? axiosInstance.defaults.baseURL : `${axiosInstance.defaults.baseURL}/api`}/custom-gpts/${editGptId}`, 
-                    apiFormData, 
-                    { 
+                    `${axiosInstance.defaults.baseURL.endsWith('/api') ? axiosInstance.defaults.baseURL : `${axiosInstance.defaults.baseURL}/api`}/custom-gpts/${editGptId}`,
+                    apiFormData,
+                    {
                         withCredentials: true,
-                        headers: { 'Content-Type': 'multipart/form-data' } 
+                        headers: { 'Content-Type': 'multipart/form-data' }
                     }
                 );
                 successMessage = "Custom GPT updated successfully!";
             } else {
                 response = await axiosInstance.post(
-                    `${axiosInstance.defaults.baseURL.endsWith('/api') ? axiosInstance.defaults.baseURL : `${axiosInstance.defaults.baseURL}/api`}/custom-gpts`, 
-                    apiFormData, 
-                    { 
+                    `${axiosInstance.defaults.baseURL.endsWith('/api') ? axiosInstance.defaults.baseURL : `${axiosInstance.defaults.baseURL}/api`}/custom-gpts`,
+                    apiFormData,
+                    {
                         withCredentials: true,
-                        headers: { 'Content-Type': 'multipart/form-data' } 
+                        headers: { 'Content-Type': 'multipart/form-data' }
                     }
                 );
-                 successMessage = "Custom GPT created successfully!";
+                successMessage = "Custom GPT created successfully!";
             }
-            
+
             // Get gptId and extract file URLs from response
             const gptId = response.data.customGpt._id;
             const fileUrls = response.data.customGpt.knowledgeFiles.map(file => file.fileUrl);
             const userEmail = response.data.customGpt.createdBy.email || "user@example.com";
-            
+
             // Always trigger indexing to pass system prompt, even if no files
             triggerKnowledgeIndexing(gptId, fileUrls, userEmail);
-            
+
             if (response.status === 200 || response.status === 201) {
                 toast.success(successMessage);
-                
+
                 // Call the callback to notify parent *before* navigating
                 if (onGptCreated) {
-                    onGptCreated(); 
+                    onGptCreated();
                 }
 
                 // Navigate back after success and notification
                 if (onGoBack) {
-                   onGoBack();
+                    onGoBack();
                 } else {
                     navigate('/admin'); // Fallback navigation
                 }
 
             } else {
-                 toast.error(response.data?.message || "Failed to save Custom GPT");
+                toast.error(response.data?.message || "Failed to save Custom GPT");
             }
-            
+
         } catch (error) {
             console.error("Error saving GPT:", error);
             toast.error(error.response?.data?.message || "An error occurred while saving.");
         } finally {
-            setIsSaving(false); 
+            setIsSaving(false);
         }
     };
 
@@ -539,7 +539,7 @@ When providing code examples:
     return (
         <div className={`w-full h-full flex flex-col ${isDarkMode ? 'dark' : ''} bg-gray-100 dark:bg-[#1A1A1A] text-gray-900 dark:text-white`}>
             <div className={`flex ${isMobileView ? 'flex-col' : 'flex-row'} flex-1 overflow-hidden`}>
-                
+
                 {/* Right Side - Preview (Now appears first in JSX for flex-col ordering) */}
                 <div className={`${isMobileView ? 'w-full h-1/2 border-b border-gray-300 dark:border-gray-800' : 'w-1/2 h-full'} bg-gray-200 dark:bg-[#2A2A2A] flex flex-col`}>
                     <div className="p-4 md:p-6 flex flex-col flex-1">
@@ -563,7 +563,7 @@ When providing code examples:
                             </div>
 
                             {/* Preview Content - Updated to center content */}
-                            <div className="flex-1 flex flex-col p-4 md:p-6 items-center justify-center"> 
+                            <div className="flex-1 flex flex-col p-4 md:p-6 items-center justify-center">
                                 {/* Header */}
                                 <div className="text-center mb-2 md:mb-4">
                                     <div className="flex justify-center mb-2 md:mb-4">
@@ -587,7 +587,7 @@ When providing code examples:
 
                                 {/* Conversation Starter as Preset Card (if provided) */}
                                 {formData.conversationStarter && (
-                                    <div className="w-full max-w-xs md:max-w-md mx-auto mt-2 md:mt-4"> 
+                                    <div className="w-full max-w-xs md:max-w-md mx-auto mt-2 md:mt-4">
                                         <div className="bg-white/80 dark:bg-white/[0.05] backdrop-blur-xl border border-gray-300 dark:border-white/20 shadow-[0_0_15px_rgba(204,43,94,0.2)] rounded-xl p-2 md:p-3 text-left">
                                             <p className="text-xs md:text-sm text-gray-700 dark:text-gray-300">{formData.conversationStarter}</p>
                                         </div>
@@ -598,8 +598,8 @@ When providing code examples:
                             {/* Chat Input at Bottom */}
                             <div className="p-3 md:p-4 border-t border-gray-300 dark:border-gray-800">
                                 <div className="relative">
-                                    <input 
-                                        type="text" 
+                                    <input
+                                        type="text"
                                         className="w-full bg-gray-100 dark:bg-[#1A1A1A] border border-gray-400 dark:border-gray-700 rounded-lg px-3 md:px-4 py-2 md:py-3 pr-8 md:pr-10 text-gray-900 dark:text-white focus:outline-none text-sm placeholder-gray-500 dark:placeholder-gray-500"
                                         placeholder="Ask anything"
                                         disabled
@@ -617,22 +617,22 @@ When providing code examples:
                 <div className={`${isMobileView ? 'w-full h-1/2' : 'w-1/2 h-full border-r border-gray-300 dark:border-gray-800'} overflow-y-auto p-4 md:p-6 no-scrollbar`}>
                     <div className="mb-4 md:mb-6 flex items-center">
                         {/* Back Button */}
-                        <button 
-                            onClick={onGoBack} 
+                        <button
+                            onClick={onGoBack}
                             className="mr-3 md:mr-4 p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
                             title="Back to Dashboard"
                         >
-                            <IoArrowBackOutline size={20} className="text-gray-700 dark:text-gray-300"/>
+                            <IoArrowBackOutline size={20} className="text-gray-700 dark:text-gray-300" />
                         </button>
                         <div>
                             <h1 className="text-lg md:text-2xl font-bold text-gray-900 dark:text-white">Custom GPT Builder</h1>
                             <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400">Configure your GPT on the left, test it on the right</p>
                         </div>
                     </div>
-                    
+
                     {/* Image Upload at top center */}
                     <div className="flex justify-center mb-5 md:mb-8">
-                        <div 
+                        <div
                             onClick={() => document.getElementById('gptImage').click()}
                             className="w-16 h-16 md:w-24 md:h-24 rounded-full border-2 border-dashed border-gray-400 dark:border-gray-600 flex items-center justify-center cursor-pointer hover:border-blue-500"
                         >
@@ -641,44 +641,44 @@ When providing code examples:
                             ) : (
                                 <IoAddOutline size={24} className="text-gray-500 dark:text-gray-500" />
                             )}
-                            <input 
-                                type="file" 
-                                id="gptImage" 
-                                className="hidden" 
-                                accept="image/*" 
+                            <input
+                                type="file"
+                                id="gptImage"
+                                className="hidden"
+                                accept="image/*"
                                 onChange={handleImageUpload}
                             />
                         </div>
                     </div>
-                    
+
                     {/* Basic Configuration Section */}
                     <div className="space-y-4">
                         {/* Name Field */}
                         <div>
                             <label className="block text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Name</label>
-                            <input 
-                                type="text" 
-                                name="name" 
+                            <input
+                                type="text"
+                                name="name"
                                 value={formData.name}
                                 onChange={handleInputChange}
                                 className="w-full bg-white dark:bg-[#262626] border border-gray-400 dark:border-gray-700 rounded-md px-3 py-2 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-gray-500 dark:placeholder-gray-400"
                                 placeholder="My Custom GPT"
                             />
                         </div>
-                        
+
                         {/* Description Field */}
                         <div>
                             <label className="block text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Description</label>
-                            <input 
-                                type="text" 
-                                name="description" 
+                            <input
+                                type="text"
+                                name="description"
                                 value={formData.description}
                                 onChange={handleInputChange}
                                 className="w-full bg-white dark:bg-[#262626] border border-gray-400 dark:border-gray-700 rounded-md px-3 py-2 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-gray-500 dark:placeholder-gray-400"
                                 placeholder="A helpful assistant that can answer questions about various topics."
                             />
                         </div>
-                        
+
                         {/* Model Selection with Icons */}
                         <div>
                             <label className="block text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Model</label>
@@ -702,10 +702,10 @@ When providing code examples:
                                 </div>
                             </div>
                         </div>
-                        
+
                         {/* System Prompt Section */}
                         {renderSystemPromptSection()}
-                        
+
                         {/* Web Browsing Capability */}
                         <div className="flex items-center justify-between pt-2">
                             <div>
@@ -751,16 +751,16 @@ When providing code examples:
                         {/* Conversation Starter */}
                         <div>
                             <label className="block text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Conversation Starter</label>
-                            <input 
-                                type="text" 
-                                name="conversationStarter" 
+                            <input
+                                type="text"
+                                name="conversationStarter"
                                 value={formData.conversationStarter}
                                 onChange={handleInputChange}
                                 className="w-full bg-white dark:bg-[#262626] border border-gray-400 dark:border-gray-700 rounded-md px-3 py-2 text-xs md:text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-gray-500 dark:placeholder-gray-400"
                                 placeholder="Add a conversation starter..."
                             />
                         </div>
-                        
+
                         {/* Knowledge Section */}
                         <div className="space-y-2 md:space-y-3">
                             <label className="block text-xs md:text-sm font-medium text-gray-600 dark:text-gray-300">Knowledge</label>
@@ -768,22 +768,22 @@ When providing code examples:
                                 <FaUpload className="h-4 w-4 md:h-6 md:w-6 mx-auto mb-1 md:mb-2 text-gray-500 dark:text-gray-500" />
                                 <h3 className="font-medium text-xs md:text-sm text-gray-800 dark:text-white mb-1">Upload Files</h3>
                                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 md:mb-3">Upload PDFs, docs, or text files to give your GPT specific knowledge</p>
-                                <button 
-                                    type="button" 
+                                <button
+                                    type="button"
                                     onClick={() => document.getElementById('knowledgeFiles').click()}
                                     className="px-3 md:px-4 py-1 md:py-1.5 text-xs md:text-sm bg-gray-200 dark:bg-[#262626] text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-300 dark:hover:bg-gray-700 transition-colors"
                                 >
                                     Select Files
                                 </button>
-                                <input 
-                                    type="file" 
-                                    id="knowledgeFiles" 
-                                    className="hidden" 
-                                    multiple 
-                                    onChange={handleKnowledgeUpload} 
+                                <input
+                                    type="file"
+                                    id="knowledgeFiles"
+                                    className="hidden"
+                                    multiple
+                                    onChange={handleKnowledgeUpload}
                                 />
                             </div>
-                            
+
                             {/* Display uploaded files */}
                             {knowledgeFiles.length > 0 && (
                                 <div className="mt-2">
@@ -791,8 +791,8 @@ When providing code examples:
                                         {knowledgeFiles.map((file, index) => (
                                             <li key={index} className="flex justify-between items-center bg-white dark:bg-[#262626] px-3 py-1.5 rounded text-xs md:text-sm border border-gray-400 dark:border-gray-700">
                                                 <span className="text-gray-700 dark:text-gray-300 truncate mr-2">{file.name}</span>
-                                                <button 
-                                                    type="button" 
+                                                <button
+                                                    type="button"
                                                     onClick={() => removeKnowledgeFile(index)}
                                                     className="text-gray-500 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400"
                                                 >
@@ -804,26 +804,25 @@ When providing code examples:
                                 </div>
                             )}
                             {knowledgeFiles.length === 0 && (
-                                 <div className="text-xs md:text-sm text-gray-500 dark:text-gray-500 mt-2">No files uploaded yet</div>
+                                <div className="text-xs md:text-sm text-gray-500 dark:text-gray-500 mt-2">No files uploaded yet</div>
                             )}
                         </div>
                     </div>
-                    
+
                     {/* Save Button - Updated */}
                     <div className="mt-4 md:mt-6 pt-3 md:pt-4 border-t border-gray-400 dark:border-gray-700">
-                        <button 
+                        <button
                             onClick={handleSaveGpt}
                             disabled={isSaving} // Disable button when saving
-                            className={`w-full px-4 py-2 md:py-3 rounded-md text-white text-sm md:text-base font-medium transition-colors shadow-lg ${
-                                isSaving 
-                                ? 'bg-gray-400 dark:bg-gray-500 cursor-not-allowed' 
-                                : 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700'
-                            }`}
+                            className={`w-full px-4 py-2 md:py-3 rounded-md text-white text-sm md:text-base font-medium transition-colors shadow-lg ${isSaving
+                                    ? 'bg-gray-400 dark:bg-gray-500 cursor-not-allowed'
+                                    : 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700'
+                                }`}
                         >
-                            {isSaving 
-                                ? 'Saving...' 
-                                : isEditMode 
-                                    ? "Update Configuration" 
+                            {isSaving
+                                ? 'Saving...'
+                                : isEditMode
+                                    ? "Update Configuration"
                                     : "Save Configuration"}
                         </button>
                     </div>

@@ -7,7 +7,6 @@ import { useTheme } from '../../context/ThemeContext';
 const EditPermissionsModal = ({ isOpen, onClose, member, onPermissionsUpdated }) => {
   const [role, setRole] = useState('Employee');
   const [department, setDepartment] = useState('Not Assigned');
-  const [position, setPosition] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { isDarkMode } = useTheme();
 
@@ -15,7 +14,6 @@ const EditPermissionsModal = ({ isOpen, onClose, member, onPermissionsUpdated })
     if (member) {
       setRole(member.role || 'Employee');
       setDepartment(member.department || 'Not Assigned');
-      setPosition(member.position || '');
     }
   }, [member]);
 
@@ -24,23 +22,22 @@ const EditPermissionsModal = ({ isOpen, onClose, member, onPermissionsUpdated })
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
-    
-    try {
-      const formattedRole = role.charAt(0).toUpperCase() + role.slice(1);
 
+    try {
       const response = await axiosInstance.put(`/api/auth/users/${member.id}/permissions`, {
         role,
         department,
-        position
       }, { withCredentials: true });
-      
+
       if (response.data.success) {
         toast.success('Permissions updated successfully');
+
+        const updatedRole = response.data.user.role.charAt(0).toUpperCase() + response.data.user.role.slice(1);
+
         onPermissionsUpdated({
           ...member,
-          role,
-          department,
-          position
+          role: updatedRole,
+          department: response.data.user.department,
         });
         onClose();
       } else {
@@ -63,7 +60,7 @@ const EditPermissionsModal = ({ isOpen, onClose, member, onPermissionsUpdated })
       </label>
       <div className="relative">
         {Icon && <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-          <Icon className="text-gray-400 dark:text-gray-500" size={16}/>
+          <Icon className="text-gray-400 dark:text-gray-500" size={16} />
         </div>}
         <select
           id={id}
@@ -89,7 +86,7 @@ const EditPermissionsModal = ({ isOpen, onClose, member, onPermissionsUpdated })
       </label>
       <div className="relative">
         {Icon && <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-          <Icon className="text-gray-400 dark:text-gray-500" size={16}/>
+          <Icon className="text-gray-400 dark:text-gray-500" size={16} />
         </div>}
         <input
           id={id}
@@ -108,14 +105,14 @@ const EditPermissionsModal = ({ isOpen, onClose, member, onPermissionsUpdated })
       <div className="relative bg-white dark:bg-gray-800 w-full max-w-md rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden transform transition-transform duration-300 scale-100">
         <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Edit Member Permissions</h3>
-          <button 
+          <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-white transition-colors rounded-full p-1 hover:bg-gray-200 dark:hover:bg-gray-700"
           >
             <IoClose size={22} />
           </button>
         </div>
-        
+
         <form onSubmit={handleSubmit} className="px-6 py-6 space-y-5">
           <div className="mb-2">
             <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
@@ -131,7 +128,7 @@ const EditPermissionsModal = ({ isOpen, onClose, member, onPermissionsUpdated })
               </div>
             </div>
           </div>
-          
+
           <SelectInput
             id="edit-role"
             label="Role"
@@ -140,10 +137,9 @@ const EditPermissionsModal = ({ isOpen, onClose, member, onPermissionsUpdated })
             icon={IoRibbonOutline}
           >
             <option value="Admin">Admin</option>
-            <option value="Manager">Manager</option>
             <option value="Employee">Employee</option>
           </SelectInput>
-          
+
           <SelectInput
             id="edit-department"
             label="Department"
@@ -159,16 +155,9 @@ const EditPermissionsModal = ({ isOpen, onClose, member, onPermissionsUpdated })
             <option value="Sales">Sales</option>
             <option value="Customer Support">Customer Support</option>
           </SelectInput>
-          
-          <TextInput
-            id="edit-position"
-            label="Position"
-            value={position}
-            onChange={(e) => setPosition(e.target.value)}
-            placeholder="e.g. Senior Developer"
-            icon={IoPersonOutline}
-          />
-          
+
+
+
           <div className="pt-5 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
             <button
               type="button"
@@ -180,7 +169,7 @@ const EditPermissionsModal = ({ isOpen, onClose, member, onPermissionsUpdated })
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed text-sm min-w-[150px] flex justify-center items-center"
+              className="px-4 py-2 bg-black dark:bg-white text-white dark:text-black rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed text-sm min-w-[150px] flex justify-center items-center"
             >
               {isSubmitting ? (
                 <>

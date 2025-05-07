@@ -22,16 +22,16 @@ const modelIcons = {
 
 // Memoized GPT card component
 const GptCard = memo(({ gpt, onDelete, onEdit, formatDate, onNavigate, isDarkMode, onMoveToFolder }) => (
-    <div 
-        key={gpt._id} 
+    <div
+        key={gpt._id}
         className="bg-white dark:bg-gray-800 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 hover:border-blue-400/50 dark:hover:border-gray-600 transition-all shadow-md hover:shadow-lg flex flex-col cursor-pointer group"
         onClick={() => onNavigate(`/admin/chat/${gpt._id}`)}
     >
         <div className="h-24 sm:h-32 bg-gradient-to-br from-gray-100 to-gray-300 dark:from-gray-700 dark:to-gray-900 relative flex-shrink-0 overflow-hidden">
             {gpt.imageUrl ? (
-                <img 
-                    src={gpt.imageUrl} 
-                    alt={gpt.name} 
+                <img
+                    src={gpt.imageUrl}
+                    alt={gpt.name}
                     className="w-full h-full object-cover opacity-80 dark:opacity-70 group-hover:scale-105 transition-transform duration-300"
                     loading="lazy"
                 />
@@ -40,23 +40,23 @@ const GptCard = memo(({ gpt, onDelete, onEdit, formatDate, onNavigate, isDarkMod
                     <span className={`text-3xl sm:text-4xl ${isDarkMode ? 'text-white/30' : 'text-gray-500/40'}`}>{gpt.name.charAt(0)}</span>
                 </div>
             )}
-            
+
             <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                <button 
+                <button
                     onClick={(e) => { e.stopPropagation(); onMoveToFolder(gpt); }}
                     className="p-1.5 sm:p-2 bg-white/80 dark:bg-gray-900/70 text-gray-700 dark:text-gray-200 rounded-full hover:bg-green-500 hover:text-white dark:hover:bg-green-700/80 transition-colors shadow"
                     title="Move to Folder"
                 >
                     <FiFolderPlus size={14} />
                 </button>
-                <button 
+                <button
                     onClick={(e) => { e.stopPropagation(); onEdit(gpt._id); }}
                     className="p-1.5 sm:p-2 bg-white/80 dark:bg-gray-900/70 text-gray-700 dark:text-gray-200 rounded-full hover:bg-blue-500 hover:text-white dark:hover:bg-blue-700/80 transition-colors shadow"
                     title="Edit GPT"
                 >
                     <FiEdit size={14} />
                 </button>
-                <button 
+                <button
                     onClick={(e) => { e.stopPropagation(); onDelete(gpt._id); }}
                     className="p-1.5 sm:p-2 bg-white/80 dark:bg-gray-900/70 text-gray-700 dark:text-gray-200 rounded-full hover:bg-red-500 hover:text-white dark:hover:bg-red-700/80 transition-colors shadow"
                     title="Delete GPT"
@@ -65,7 +65,7 @@ const GptCard = memo(({ gpt, onDelete, onEdit, formatDate, onNavigate, isDarkMod
                 </button>
             </div>
         </div>
-        
+
         <div className="p-3 sm:p-4 flex flex-col flex-grow">
             <div className="flex items-start justify-between mb-1.5 sm:mb-2">
                 <h3 className="font-semibold text-base sm:text-lg line-clamp-1 text-gray-900 dark:text-white">{gpt.name}</h3>
@@ -74,7 +74,7 @@ const GptCard = memo(({ gpt, onDelete, onEdit, formatDate, onNavigate, isDarkMod
                     <span className="hidden sm:inline">{gpt.model}</span>
                 </div>
             </div>
-            
+
             <p className="text-gray-600 dark:text-gray-300 text-xs sm:text-sm h-10 sm:h-12 line-clamp-2 sm:line-clamp-3 mb-3">{gpt.description}</p>
             <div className="mt-auto pt-2 border-t border-gray-100 dark:border-gray-700 text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 flex justify-between items-center">
                 <span>Created: {formatDate(gpt.createdAt)}</span>
@@ -177,7 +177,7 @@ const CollectionsPage = () => {
     const handleCreateNew = useCallback(() => {
         navigate('/admin/create-gpt');
     }, [navigate]);
-    
+
     const handleNavigate = useCallback((path) => {
         navigate(path);
     }, [navigate]);
@@ -189,15 +189,15 @@ const CollectionsPage = () => {
             day: 'numeric'
         });
     }, []);
-    
+
     const handleSearchChange = useCallback((e) => {
         setSearchTerm(e.target.value);
     }, []);
-    
+
     const toggleSortOptions = useCallback(() => {
         setShowSortOptions(prev => !prev);
     }, []);
-    
+
     const handleSortOptionSelect = useCallback((option) => {
         setSortOption(option);
         setShowSortOptions(false);
@@ -212,8 +212,8 @@ const CollectionsPage = () => {
     // Function called when a GPT is successfully moved
     const handleGptMoved = useCallback((movedGpt, newFolderName) => {
         // Update the local state
-        setCustomGpts(prevGpts => 
-            prevGpts.map(gpt => 
+        setCustomGpts(prevGpts =>
+            prevGpts.map(gpt =>
                 gpt._id === movedGpt._id ? { ...gpt, folder: newFolderName || null } : gpt
             )
         );
@@ -221,18 +221,18 @@ const CollectionsPage = () => {
         if (newFolderName && !folders.includes(newFolderName)) {
             setFolders(prevFolders => [...prevFolders, newFolderName]);
         }
-      
+
         setShowMoveModal(false);
         setGptToMove(null);
         toast.success(`GPT "${movedGpt.name}" moved successfully.`);
     }, [folders]); // Include folders in dependency array
 
-    
+
     const filteredGpts = useMemo(() => {
         return customGpts
             .filter(gpt => {
                 if (!gpt || !gpt.name || !gpt.description || !gpt.model) return false;
-                
+
                 // Folder filtering
                 if (selectedFolder === 'All') return true;
                 if (selectedFolder === 'Uncategorized') return !gpt.folder;
@@ -287,13 +287,13 @@ const CollectionsPage = () => {
     }
 
     return (
-        <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-900 text-black dark:text-white p-4 sm:p-6 overflow-hidden">
+        <div className="flex flex-col h-full bg-gray-50 dark:bg-black text-black dark:text-white p-4 sm:p-6 overflow-hidden">
             {/* Header */}
             <div className="mb-4 md:mb-6 flex-shrink-0 text-center sm:text-left ">
                 <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">Collections</h1>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Manage your custom GPTs</p>
             </div>
-            
+
             {/* Controls: Folder, Search, Sort, Create */}
             <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 md:mb-6 gap-3 md:gap-4 flex-shrink-0">
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full md:w-auto">
@@ -326,7 +326,7 @@ const CollectionsPage = () => {
                             aria-label="Search GPTs"
                         />
                     </div>
-                    
+
                     {/* Sort Dropdown */}
                     <div className="relative" ref={sortDropdownRef}>
                         <button
@@ -336,7 +336,7 @@ const CollectionsPage = () => {
                             aria-expanded={showSortOptions}
                         >
                             <span className="truncate">Sort: {sortOption.charAt(0).toUpperCase() + sortOption.slice(1)}</span>
-                            {showSortOptions ? <FiChevronUp size={16}/> : <FiChevronDown size={16}/>}
+                            {showSortOptions ? <FiChevronUp size={16} /> : <FiChevronDown size={16} />}
                         </button>
                         {showSortOptions && (
                             <div className="absolute left-0 mt-2 w-36 bg-white dark:bg-gray-800 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 dark:ring-gray-700 z-10 overflow-hidden">
@@ -344,7 +344,7 @@ const CollectionsPage = () => {
                                     <button
                                         key={option}
                                         onClick={() => handleSortOptionSelect(option)}
-                                        className={`w-full text-left px-4 py-2 text-sm ${sortOption === option ? 'font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                                        className={`w-full text-left px-4 py-2 text-sm ${sortOption === option ? 'font-semibold text-white dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
                                     >
                                         {option.charAt(0).toUpperCase() + option.slice(1)}
                                     </button>
@@ -353,26 +353,26 @@ const CollectionsPage = () => {
                         )}
                     </div>
                 </div>
-                
+
                 {/* Create Button */}
                 <button
                     onClick={handleCreateNew}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors flex-shrink-0 whitespace-nowrap"
+                    className="flex items-center gap-2 px-4 py-2 bg-black dark:bg-white hover:bg-gray-100 dark:hover:bg-gray-700 text-black dark:text- rounded-lg font-medium text-sm transition-colors flex-shrink-0 whitespace-nowrap"
                 >
                     <FiPlus size={18} /> Create New GPT
                 </button>
             </div>
-            
+
             {/* GPT Grid */}
             <div className="flex-1 overflow-y-auto pb-4 scrollbar-hide">
                 {filteredGpts.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                         {filteredGpts.map((gpt) => (
-                            <GptCard 
+                            <GptCard
                                 key={gpt._id}
                                 gpt={gpt}
                                 onDelete={handleDelete}
-                                onEdit={handleEdit} 
+                                onEdit={handleEdit}
                                 formatDate={formatDate}
                                 onNavigate={handleNavigate}
                                 isDarkMode={isDarkMode}
@@ -385,7 +385,7 @@ const CollectionsPage = () => {
                         <FaRobot size={48} className="mb-4 text-gray-400 dark:text-gray-500" />
                         <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300">No GPTs Found</h3>
                         <p className="max-w-xs mt-1">
-                            {searchTerm 
+                            {searchTerm
                                 ? `No GPTs match your search "${searchTerm}" in ${selectedFolder === 'All' ? 'any folder' : `the '${selectedFolder}' folder`}.`
                                 : `No GPTs found in ${selectedFolder === 'All' ? 'your collections' : `the '${selectedFolder}' folder`}.`}
                         </p>

@@ -3,16 +3,13 @@ const User = require('../models/User');
 const Invitation = require('../models/Invitation');
 const { sendEmail } = require('../lib/emailService');
 
-/**
- * Invite a team member
- * @route POST /api/auth/invite
- * @access Private (Admin only)
- */
-exports.inviteTeamMember = async (req, res) => {
+
+const inviteTeamMember = async (req, res) => {
   try {
-    const { email, role } = req.body;
+    const { email } = req.body;
     
-    // Verify the current user is an admin
+    const role = 'employee';
+    
     if (!req.user || req.user.role !== 'admin') {
       return res.status(403).json({ 
         success: false, 
@@ -20,7 +17,6 @@ exports.inviteTeamMember = async (req, res) => {
       });
     }
     
-    // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ 
@@ -29,7 +25,6 @@ exports.inviteTeamMember = async (req, res) => {
       });
     }
     
-    // Check if invitation already exists and is pending
     const existingInvitation = await Invitation.findOne({ 
       email, 
       status: 'pending',
@@ -43,12 +38,10 @@ exports.inviteTeamMember = async (req, res) => {
       });
     }
     
-    // Generate a unique invitation token
     const token = crypto.randomBytes(20).toString('hex');
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7); // Token valid for 7 days
     
-    // Create invitation record
     const invitation = new Invitation({
       email,
       role,
@@ -59,10 +52,8 @@ exports.inviteTeamMember = async (req, res) => {
     
     await invitation.save();
     
-    // Create invite URL
     const inviteUrl = `${process.env.FRONTEND_URL}/register?token=${token}`;
     
-    // Send email invitation
     try {
       await sendEmail({
         to: email,
@@ -70,7 +61,7 @@ exports.inviteTeamMember = async (req, res) => {
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;">
             <h1 style="color: #333;">You've been invited to join the team</h1>
-            <p>You've been invited by ${req.user.name} to join as a ${role}.</p>
+            <p>You've been invited by ${req.user.name}</p>
             <p>Click the button below to create your account:</p>
             <a href="${inviteUrl}" style="display: inline-block; padding: 10px 20px; background-color: #3182ce; color: white; border-radius: 5px; text-decoration: none; margin: 15px 0;">Accept Invitation</a>
             <p style="color: #666; font-size: 0.9em;">This invitation expires in 7 days.</p>
@@ -85,7 +76,6 @@ exports.inviteTeamMember = async (req, res) => {
         message: 'Invitation sent successfully'
       });
     } catch (emailError) {
-      // If email fails, delete the invitation
       await Invitation.findByIdAndDelete(invitation._id);
       
       console.error('Error sending invitation email:', emailError);
@@ -103,14 +93,8 @@ exports.inviteTeamMember = async (req, res) => {
   }
 };
 
-/**
- * Get count of pending invitations
- * @route GET /api/auth/pending-invites/count
- * @access Private (Admin only)
- */
-exports.getPendingInvitesCount = async (req, res) => {
+const getPendingInvitesCount = async (req, res) => {
   try {
-    // Verify the current user is an admin
     if (!req.user || req.user.role !== 'admin') {
       return res.status(403).json({ 
         success: false, 
@@ -136,12 +120,7 @@ exports.getPendingInvitesCount = async (req, res) => {
   }
 };
 
-/**
- * Verify invitation token
- * @route GET /api/auth/verify-invitation/:token
- * @access Public
- */
-exports.verifyInvitation = async (req, res) => {
+const verifyInvitation = async (req, res) => {
   try {
     const { token } = req.params;
     
@@ -173,3 +152,11 @@ exports.verifyInvitation = async (req, res) => {
     });
   }
 }; 
+
+module.exports = {
+  inviteTeamMember,
+  getPendingInvitesCount,
+  verifyInvitation
+};
+
+
