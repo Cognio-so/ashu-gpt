@@ -136,7 +136,7 @@ When providing code examples:
     // Model icons mapping
     const modelIcons = {
         'gpt-4': <RiOpenaiFill className="text-green-500 mr-2" size={18} />,
-        'gpt-3.5': <SiOpenai className="text-green-400 mr-2" size={16} />,
+        'gpt-4o-mini': <SiOpenai className="text-green-400 mr-2" size={16} />,
         'claude': <FaRobot className="text-purple-400 mr-2" size={16} />,
         'gemini': <SiGooglegemini className="text-blue-400 mr-2" size={16} />,
         'llama': <BiLogoMeta className="text-blue-500 mr-2" size={18} />
@@ -689,7 +689,7 @@ When providing code examples:
                                     className="w-full bg-white dark:bg-[#262626] border border-gray-400 dark:border-gray-700 rounded-md pl-10 pr-4 py-2 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500 appearance-none"
                                 >
                                     <option value="gpt-4">GPT-4</option>
-                                    <option value="gpt-3.5">GPT-3.5</option>
+                                    <option value="gpt-4o-mini">GPT-4o Mini</option>
                                     <option value="claude">Claude</option>
                                     <option value="gemini">Gemini</option>
                                     <option value="llama">Llama</option>

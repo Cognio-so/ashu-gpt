@@ -13,6 +13,10 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { FaFilePdf, FaFileWord, FaFileAlt, FaFile } from 'react-icons/fa';
+import { SiOpenai, SiGooglegemini } from 'react-icons/si';
+import { FaRobot } from 'react-icons/fa6';
+import { BiLogoMeta } from 'react-icons/bi';
+import { RiOpenaiFill } from 'react-icons/ri';
 
 const PYTHON_URL = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:8000';
 
@@ -83,6 +87,14 @@ const MarkdownStyles = () => (
         }
     `}} />
 );
+
+const modelIcons = {
+    'gpt-4': <RiOpenaiFill className="text-green-500" size={18} />,
+    'gpt-4o-mini': <SiOpenai className="text-green-400" size={16} />,
+    'claude': <FaRobot className="text-purple-400" size={16} />,
+    'gemini': <SiGooglegemini className="text-blue-400" size={16} />,
+    'llama': <BiLogoMeta className="text-blue-500" size={18} />
+};
 
 const AdminChat = () => {
     const { gptId } = useParams();
@@ -752,8 +764,14 @@ const AdminChat = () => {
                         </button>
 
                         {gptData && (
-                            <div className="ml-2 text-sm md:text-base font-medium truncate max-w-[150px] md:max-w-xs">
-                                New Chat
+                            <div className="ml-2 text-sm md:text-base font-medium flex items-center">
+                                <span className="mr-1">New Chat</span>
+                                {gptData.model && (
+                                    <div className="flex items-center ml-2 text-xs md:text-sm px-2 py-0.5 bg-gray-100 dark:bg-gray-800 rounded-full">
+                                        {modelIcons[gptData.model] || null}
+                                        <span>{gptData.model === 'gpt-4o-mini' ? 'GPT-4o Mini' : gptData.model}</span>
+                                    </div>
+                                )}
                             </div>
                         )}
 
